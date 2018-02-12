@@ -94,7 +94,7 @@ class User():
         """ To call if you created this user only with a name, and want more data """
         try:
             self.user_info = twitter_api.get_user(self.screen_name)
-            self.protected = False
+            self.protected = self.user_info.protected
         except tweepy.error.TweepError as e:
             print e
             if e[0][0]['code'] == 50: # 50 is user not found
@@ -168,16 +168,22 @@ class User():
         try:
             self.friends_ids = twitter_api.friends_ids(self.screen_name)
         except tweepy.error.TweepError as e:
-            if e == 'Not authorized':
-                print('The account of this user is protected, we can not get its friends.')
-            elif e[0][0]['code'] == 88 or e[0][0]['code'] == 50: # 50 is user not found
-                print("Rate limit exceeded to get friends data, we will sleep are retry in 15 minutes. The friends so far are stored.")
-                # Sleep
-                print('Waiting 5 minutes...')
-                time.sleep(300)
-                print('Resuming download...')
-                # Warning, this can loop
-                self.get_friends_twitter_api()
+            try:
+                if e == 'Not authorized':
+                    print('The account of this user is protected, we can not get its friends.')
+                elif e[0][0]['code'] == 50: # 50 is user not found
+                    return False
+                elif e[0][0]['code'] == 88: # Rate limit
+                    print("Rate limit exceeded to get friends data, we will sleep are retry in 15 minutes. The friends so far are stored.")
+                    # Sleep
+                    print('Waiting 5 minutes...')
+                    time.sleep(300)
+                    print('Resuming download...')
+                    # Warning, this can loop
+                    self.get_friends_twitter_api()
+            except TypeError:
+                print e
+
 
     def get_friends(self, api, username, limit, offline):
         """
@@ -746,7 +752,7 @@ if __name__ == '__main__':
         try:
             if e[0][0]['code'] == 50:
                 # user not found
-                os.rmdir(dirpath)
+                os.rmdir(dirpath + name)
         except TypeError:
             if e == 'Not authorized':
                 print('The account of this user is protected, we can not get its friends.')
