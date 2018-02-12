@@ -96,8 +96,13 @@ class User():
             self.user_info = twitter_api.get_user(self.screen_name)
             self.protected = False
         except tweepy.error.TweepError as e:
-            print('This user is protected and we can not get its data.')
-            self.protected = True
+            print e
+            if e[0][0]['code'] == 50: # 50 is user not found
+                print('User not found')
+                return False
+            elif e[0][0]['code'] == 88: 
+                print('This user is protected and we can not get its data.')
+                self.protected = True
 
     def get_tweets(self, api, username, limit):
         """ Download Tweets from username account """
@@ -158,6 +163,22 @@ class User():
             print("[+] Friends timezones")
             print_stats(self.friends_timezone, top=10)
 
+    def get_friends_twitter_api(self):
+        """ use the api for getting frinds """
+        try:
+            self.friends_ids = twitter_api.friends_ids(self.screen_name)
+        except tweepy.error.TweepError as e:
+            if e == 'Not authorized':
+                print('The account of this user is protected, we can not get its friends.')
+            elif e[0][0]['code'] == 88 or e[0][0]['code'] == 50: # 50 is user not found
+                print("Rate limit exceeded to get friends data, we will sleep are retry in 15 minutes. The friends so far are stored.")
+                # Sleep
+                print('Waiting 5 minutes...')
+                time.sleep(300)
+                print('Resuming download...')
+                # Warning, this can loop
+                self.get_friends_twitter_api()
+
     def get_friends(self, api, username, limit, offline):
         """
         Get friends. Load friends from cache
@@ -178,14 +199,10 @@ class User():
         # Are we offline?
         if args.debug > 0 and offline:
             print('We are in offline mode, so we are not downloading more friends.')
-        #elif not offline and (limit == -1 or limit > len(self.friends)):
-        elif not offline:
-            # Get the list of friends
-            try:
-                self.friends_ids = twitter_api.friends_ids(self.screen_name)
-            except tweepy.error.TweepError as e:
-                print('This user is protected and we can not get its data.')
-                return False
+        # If we are not offline and the user is not protected, try to get their friends
+        elif not offline and not self.protected:
+            # Get the list of friends from twitter
+            self.get_friends_twitter_api()
             print('Total amount of friends this user follows: {}'.format(self.user_info.friends_count))
             print('Total amount of friends downloaded in cache: {}'.format(len(self.friends)))
             # If the limit requested is > than the amount we already have, continue downloading from where we left
@@ -210,10 +227,11 @@ class User():
                             try:
                                 friend = twitter_api.get_user(friend_id)
                             except tweepy.error.TweepError as e:
-                                if e[0][0]['code'] == 88 or e[0][0]['code'] == 50:
+                                if e == 'Not authorized':
+                                    print('The account of this user is protected, we can not get its friends.')
+                                elif e[0][0]['code'] == 88 or e[0][0]['code'] == 50:
                                     print("Rate limit exceeded to get friends data, we will sleep are retry in 15 minutes. The friends so far are stored.")
                                 # Store friends so far
-                                #pickle.dump(self.friends, friends_file_fd )
                                 pickle.dump(self.friends, open( self.dirpath + self.screen_name + '/' + self.screen_name + '.twitter_friends', "wb" ) )
                                 # Sleep
                                 print('Waiting 15 minutes...')
@@ -686,7 +704,7 @@ if __name__ == '__main__':
                 except OSError:
                     # Already exists
                     if args.debug > 1:
-                        print('The user exists, loading its data.')
+                        print('The user {} exists, loading its data.'.format(name))
                     # Load what we know from this user
                     try:
                         datapath = os.path.expanduser(dirpath + name + '/' + name + '.data')
