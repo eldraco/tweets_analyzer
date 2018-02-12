@@ -100,6 +100,9 @@ class User():
             if e[0][0]['code'] == 50: # 50 is user not found
                 print('User not found')
                 return False
+            elif e[0][0]['code'] == 63: # your account is suspended
+                print('User has been suspended')
+                return False
             elif e[0][0]['code'] == 88: 
                 print('This user is protected and we can not get its data.')
                 self.protected = True
@@ -172,6 +175,8 @@ class User():
                 if e == 'Not authorized':
                     print('The account of this user is protected, we can not get its friends.')
                 elif e[0][0]['code'] == 50: # 50 is user not found
+                    return False
+                elif e[0][0]['code'] == 63: # user suspended
                     return False
                 elif e[0][0]['code'] == 88: # Rate limit
                     print("Rate limit exceeded to get friends data, we will sleep are retry in 15 minutes. The friends so far are stored.")
@@ -745,10 +750,6 @@ if __name__ == '__main__':
 
     except tweepy.error.TweepError as e:
         print("[\033[91m!\033[0m] Twitter error: %s" % e)
-        #if e[0][0]['code'] == 88:
-            ## rate limit exceded
-            #for name in args.names.split(','):
-        #pickle.dump(self.friends, open( self.dirpath + '/' + self.screen_name+ '/' + self.screen_name + '.twitter_friends', "wb" ) )
         try:
             if e[0][0]['code'] == 50:
                 # user not found
