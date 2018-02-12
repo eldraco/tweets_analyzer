@@ -115,9 +115,8 @@ class User():
         if self.protected:
             print('[+] User           : {}'.format(bold('@'+self.screen_name)))
             print('[+] Date:          : {}'.format(bold(str(self.creation_time))))
-            print('[+] Protected      : {}'.format(bold(str(self.user_info.protected))))
+            print('[+] Protected      : {}'.format(bold(str(self.protected))))
             return True
-
         print('[+] User           : {}'.format(bold('@'+self.screen_name)))
         print('[+] Date:          : {}'.format(bold(str(self.creation_time))))
         print('[+] lang           : {}'.format(bold(self.user_info.lang)))
@@ -150,13 +149,14 @@ class User():
         numfriends: Max num of friends to retrieve
         offline: if we use offline friends
         """
-        max_friends = numpy.amin([self.user_info.friends_count, numfriends])
-        print('[+] Analyzing friends.')
-        self.process_friends()
-        print("[+] Friends languages")
-        print_stats(self.friends_lang, top=10)
-        print("[+] Friends timezones")
-        print_stats(self.friends_timezone, top=10)
+        if not self.protected:
+            max_friends = numpy.amin([self.user_info.friends_count, numfriends])
+            print('[+] Analyzing friends.')
+            self.process_friends()
+            print("[+] Friends languages")
+            print_stats(self.friends_lang, top=10)
+            print("[+] Friends timezones")
+            print_stats(self.friends_timezone, top=10)
 
     def get_friends(self, api, username, limit, offline):
         """
