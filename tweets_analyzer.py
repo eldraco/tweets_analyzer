@@ -506,63 +506,107 @@ def main():
 def plot_users(users, dirpath):
     """ Read the friends of these users from a file and plot a graph"""
     print('Plotting a unique graph for all users')
-    pygraph = pydot.Dot(graph_type='graph', resolution='1400000')
+    #pygraph = pydot.Dot(graph_type='graph', resolution='1400000')
+    pygraph = pydot.Dot(graph_type='graph', resolution='32000')
     pygraph.set('center', '1')
     pygraph.set('ratio', 'auto')
     pygraph.set_fontsize('21')
     pygraph.set_ranksep('4 equally')
     pygraph.set_rankdir('LR')
     counter_papa = {}
-    j=0
+    color_node = {}
+    counter_for_user = 0
+    # First count how many times each node is referenced
     for user in users.split(','):
         # read their friends
-        node = pydot.Node(user,fontcolor='black',shape='rectangle')
-        node.set_group('First')
-        pygraph.add_node(node)
         try:
             friends = pickle.load( open( dirpath + '/' + user + '/' + user + '.twitter_friends', "rb" ) )
         except IOError:
             # This user is not in the cache
             continue
         for friend in list(set(friends.values())):
-            node = pydot.Node(friend.screen_name,fontcolor='black')
-            node.set_group('Second')
-            pygraph.add_node(node)
-            # Make an edge
-            edge = pydot.Edge(user, friend.screen_name)
-            pygraph.add_edge(edge)
             try:
                 counter_papa[friend.screen_name] += 1
             except KeyError:
                 counter_papa[friend.screen_name] = 1
-            j += 1
-        print('{} nodes added for user {}'.format(j, user))
-        j=0
-    nodes = pygraph.get_node_list()
-    i=0
+            counter_for_user += 1
+        print('User {} had {} nodes.'.format(user, counter_for_user))
+        counter_for_user = 0
+    # Adding colors
+    if args.debug > 0:
+        print('Putting the color in the nodes.')
     for node in counter_papa:
         if counter_papa[node] == 1:
-            counter_papa[node] = 'LightBlue'
+            color_node[node] = 'LightBlue'
         elif counter_papa[node] == 2:
-            counter_papa[node] = 'Red'
+            color_node[node] = 'Red'
         elif counter_papa[node] == 3:
-            counter_papa[node] = 'Yellow'
+            color_node[node] = 'Yellow'
         elif counter_papa[node] == 4:
-            counter_papa[node] = 'Blue'
+            color_node[node] = 'Blue'
         elif counter_papa[node] == 5:
-            counter_papa[node] = 'Orange'
+            color_node[node] = 'Orange'
         elif counter_papa[node] == 6:
-            counter_papa[node] = 'crimson'
+            color_node[node] = 'crimson'
         elif counter_papa[node] == 7:
-            counter_papa[node] = 'forestgreen'
+            color_node[node] = 'forestgreen'
         elif counter_papa[node] == 8:
-            counter_papa[node] = 'deeppink'
+            color_node[node] = 'deeppink'
         elif counter_papa[node] == 9:
-            counter_papa[node] = 'cadetblue'
+            color_node[node] = 'cadetblue'
         elif counter_papa[node] == 10:
-            counter_papa[node] = 'aquamarine'
+            color_node[node] = 'aquamarine'
         else:
-            counter_papa[node] = 'white'
+            color_node[node] = 'white'
+    # Delete the secondary nodes that had less than certain amount of edges to them
+    try:
+        minnodes = args.numfriends
+    except AttributeError:
+        minnodes = 0
+    count_reviewed = 0
+    for user in users.split(','):
+        if args.debug > 1:
+            print('User: {}'.format(user))
+        # read their friends
+        try:
+            friends = pickle.load( open( dirpath + '/' + user + '/' + user + '.twitter_friends', "rb" ) )
+        except IOError:
+            # This user is not in the cache
+            continue
+        # Add the main nodes
+        if pygraph.get_node(user) == []:
+            node = pydot.Node(user,fontcolor='black',shape='rectangle')
+            node.set_group('First')
+            node.set_style('filled')
+            node.set_fontsize('36')
+            node.set_color('red')
+            node.set_fontname('Times-Bold')
+            node.set_fontcolor('yellow')
+            node.set_fillcolor('black')
+            pygraph.add_node(node)
+            count_reviewed += 1
+            if args.debug > 1:
+                print('Add node: {} is {}'.format(node.get_name(), count_reviewed))
+        for friend in list(set(friends.values())):
+            if args.debug > 1:
+                print('\tEvaluating Friend: {}, has {} links'.format(friend.screen_name, counter_papa[friend.screen_name]))
+            if counter_papa[friend.screen_name] > minnodes:
+                # Add the secondary nodes
+                if pygraph.get_node(friend.screen_name) == []:
+                    node = pydot.Node(friend.screen_name,fontcolor='black')
+                    node.set_group('Second')
+                    node.set_style('filled')
+                    node.set_fillcolor(color_node[node.get_name().replace('"','')])
+                    pygraph.add_node(node)
+                    count_reviewed += 1
+                    if args.debug > 1:
+                        print('\t\tAdd node: {} is {}'.format(node.get_name(), count_reviewed))
+                # Make the edge
+                edge = pydot.Edge(user, friend.screen_name)
+                pygraph.add_edge(edge)
+    print('Total nodes processed: {}'.format(count_reviewed))
+    nodes = pygraph.get_node_list()
+    print('Amount of nodes in the graph: {}'.format(len(nodes)))
     if args.debug > 0:
         print ('Colors in the graph:')
         print ('Share 1 follower: LightBlue')
@@ -576,25 +620,6 @@ def plot_users(users, dirpath):
         print ('Share 9 followers: Cadet Blue')
         print ('Share 10 followers: Aquamarine')
         print ('Share >10 followers: White')
-    for node in nodes:
-        if node.get_group() == 'Second':
-            # The users followed by the main accounts we are analyzing
-            node.set_style('filled')
-            try:
-                node.set_fillcolor(counter_papa[node.get_name()])
-            except KeyError:
-                pass
-            i += 1
-        elif node.get_group() == 'First':
-            # The main accouunts we are analyzing.
-            node.set_fontsize('36')
-            node.set_color('red')
-            node.set_fontname('Times-Bold')
-            node.set_fontcolor('yellow')
-            node.set_fillcolor('black')
-            node.set_style('filled')
-    print('{} nodes reviewed'.format(i))
-    #pygraph.write_png('{}.graph.png'.format(users))
     pygraph.write_png('graph.png')
     # Node methods
     # 'add_style', 'create_attribute_methods', 'get', 'get_URL', 'get_attributes', 
@@ -747,6 +772,7 @@ if __name__ == '__main__':
         # TODO
         # Finish the summary as before
         # Add better colors to dot, https://www.graphviz.org/doc/info/colors.html
+        # Add when the user was created.
 
     except tweepy.error.TweepError as e:
         print("[\033[91m!\033[0m] Twitter error: %s" % e)
