@@ -694,6 +694,7 @@ if __name__ == '__main__':
                 pickle.dump(user, open( dirpath + name + '/' + name + '.data', "wb" ) )
         # TODO
         # Finish the summary as before
+        # Add better colors to dot, https://www.graphviz.org/doc/info/colors.html
 
     except tweepy.error.TweepError as e:
         print("[\033[91m!\033[0m] Twitter error: %s" % e)
