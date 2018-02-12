@@ -82,6 +82,8 @@ class User():
         self.dirpath = ''
         self.last_friend_retrieved_id = False
         self.user_info = False
+        # If the user is protected
+        self.protected = False
 
     def set_twitter_info(self, data):
         """ To call if you first obtained the data from twitter, you created a user and now you want to store it """
@@ -92,8 +94,10 @@ class User():
         """ To call if you created this user only with a name, and want more data """
         try:
             self.user_info = twitter_api.get_user(self.screen_name)
+            self.protected = False
         except tweepy.error.TweepError as e:
             print('This user is protected and we can not get its data.')
+            self.protected = True
 
     def get_tweets(self, api, username, limit):
         """ Download Tweets from username account """
@@ -108,6 +112,12 @@ class User():
         else:
             def bold(text):
                 return text
+        if self.protected:
+            print('[+] User           : {}'.format(bold('@'+self.screen_name)))
+            print('[+] Date:          : {}'.format(bold(str(self.creation_time))))
+            print('[+] Protected      : {}'.format(bold(str(self.user_info.protected))))
+            return True
+
         print('[+] User           : {}'.format(bold('@'+self.screen_name)))
         print('[+] Date:          : {}'.format(bold(str(self.creation_time))))
         print('[+] lang           : {}'.format(bold(self.user_info.lang)))
@@ -467,14 +477,12 @@ def main():
 def plot_users(users, dirpath):
     """ Read the friends of these users from a file and plot a graph"""
     print('Plotting a unique graph for all users')
-    pygraph = pydot.Dot(graph_type='graph', resolution='76800')
+    pygraph = pydot.Dot(graph_type='graph', resolution='1400000')
     pygraph.set('center', '1')
     pygraph.set('ratio', 'auto')
     pygraph.set_fontsize('21')
-    pygraph.set_ranksep('3 equally')
+    pygraph.set_ranksep('4 equally')
     pygraph.set_rankdir('LR')
-    #pygraph.set_rank('sink')
-    #print(pygraph.get_resolution())
     counter_papa = {}
     j=0
     for user in users.split(','):
@@ -524,9 +532,24 @@ def plot_users(users, dirpath):
             counter_papa[node] = 'cadetblue'
         elif counter_papa[node] == 10:
             counter_papa[node] = 'aquamarine'
+        else:
+            counter_papa[node] = 'white'
+    if args.debug > 0:
+        print ('Colors in the graph:')
+        print ('Share 1 follower: LightBlue')
+        print ('Share 2 followers: Red')
+        print ('Share 3 followers: Yellow')
+        print ('Share 4 followers: Blue')
+        print ('Share 5 followers: Orange')
+        print ('Share 6 followers: Crimson')
+        print ('Share 7 followers: Forest Green')
+        print ('Share 8 followers: Deep Pink')
+        print ('Share 9 followers: Cadet Blue')
+        print ('Share 10 followers: Aquamarine')
+        print ('Share >10 followers: White')
     for node in nodes:
         if node.get_group() == 'Second':
-            #print('{}: {}'.format(node.get_name(), node.get_root()))
+            # The users followed by the main accounts we are analyzing
             node.set_style('filled')
             try:
                 node.set_fillcolor(counter_papa[node.get_name()])
@@ -534,7 +557,7 @@ def plot_users(users, dirpath):
                 pass
             i += 1
         elif node.get_group() == 'First':
-            #print(node.get_name())
+            # The main accouunts we are analyzing.
             node.set_fontsize('36')
             node.set_color('red')
             node.set_fontname('Times-Bold')
