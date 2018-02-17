@@ -107,13 +107,74 @@ class User():
                 print('This user is protected and we can not get its data.')
                 self.protected = True
 
-    def get_tweets(self, api, username, limit):
+    def get_tweets(self):
         """ Download Tweets from username account """
-        for status in tqdm(tweepy.Cursor(api.user_timeline, screen_name=username).items(limit),
-                           unit="tw", total=limit):
-            process_tweet(status)
+        num_tweets = numpy.amin([args.maxtweets, self.user_info.statuses_count])
+        # Download tweets
+        print('[+] Downloading {} tweets...'.format(num_tweets))
+        for status in tqdm(tweepy.Cursor(twitter_api.user_timeline, screen_name=self.screen_name).items(num_tweets), unit="tw", total=num_tweets):
+            newTweet = Tweet(status)
+            newTweet.process_tweet(status)
 
     def print_summary(self, color):
+        """
+        Print a summary of the account
+        """
+        self.print_basic_info(color)
+        #self.print_tweets()
+        self.print_friends_analysis()
+
+    def print_tweets(self):
+        self.get_tweets()
+        self.analyze_tweets()
+        self.print_tweets()
+
+    def print_charts(self):
+
+        # Checking if we have enough data (considering it's good to have at least 30 days of data)
+
+        # Print activity distrubution charts
+        print_charts(activity_hourly, "Daily activity distribution (per hour)")
+        print_charts(activity_weekly, "Weekly activity distribution (per day)", weekday=True)
+
+        print("[+] Detected languages (top 5)")
+        print_stats(detected_langs)
+
+        print("[+] Detected sources (top 10)")
+        print_stats(detected_sources, top=10)
+
+        print("[+] There are \033[1m%d\033[0m geo enabled tweet(s)" % geo_enabled_tweets)
+        if len(detected_places) != 0:
+            print("[+] Detected places (top 10)")
+            print_stats(detected_places, top=10)
+
+        print("[+] Top 10 hashtags")
+        print_stats(detected_hashtags, top=10)
+
+        if num_tweets > 0:
+            print("[+] @%s did \033[1m%d\033[0m RTs out of %d tweets (%.1f%%)" % (args.name, retweets, num_tweets, (float(retweets) * 100 / num_tweets)))
+
+        # Converting users id to screen_names
+        retweeted_users_names = {}
+        for k in retweeted_users.keys():
+            retweeted_users_names[id_screen_names[k]] = retweeted_users[k]
+
+        print("[+] Top 5 most retweeted users")
+        print_stats(retweeted_users_names, top=5)
+
+        mentioned_users_names = {}
+        for k in mentioned_users.keys():
+            mentioned_users_names[id_screen_names[k]] = mentioned_users[k]
+        print("[+] Top 5 most mentioned users")
+        print_stats(mentioned_users_names, top=5)
+
+        print("[+] Most referenced domains (from URLs)")
+        print_stats(detected_domains, top=6)
+
+    def print_basic_info(self, color):
+        """
+        Print basic info about the user
+        """
         if color:
             def bold(text):
                 return '\033[1m' + text + '\033[0m'
@@ -143,6 +204,12 @@ class User():
         print('[+] URL            : {}'.format(bold(str(self.user_info.url))))
         print('[+] Verified?      : {}'.format(bold(str(self.user_info.verified))))
         print('[+] Tweets liked   : {}'.format(bold(str(self.user_info.favourites_count))))
+        try:
+            censored = self.user_info.withheld_in_countries
+        except Exception as e:
+            censored = 'None'
+        print('[+] Censored in countries : {}'.format(censored))
+
         print('')
 
     def print_followers(self):
@@ -151,20 +218,32 @@ class User():
         """
         print('{},{},{}'.format(self.creation_time,self.screen_name,self.user_info.followers_count))
 
-    def analyze_friends(self, numfriends, offline):
+    def print_friends_analysis(self):
         """
         Analyze the friends of this user
-        numfriends: Max num of friends to retrieve
-        offline: if we use offline friends
         """
+        # If the account is protected, we can not ask for its friends
         if not self.protected:
-            max_friends = numpy.amin([self.user_info.friends_count, numfriends])
+            max_friends = numpy.amin([self.user_info.friends_count, args.numfriends])
             print('[+] Analyzing friends.')
             self.process_friends()
             print("[+] Friends languages")
-            print_stats(self.friends_lang, top=10)
+            self.print_stats(self.friends_lang, top=10)
             print("[+] Friends timezones")
-            print_stats(self.friends_timezone, top=10)
+            self.print_stats(self.friends_timezone, top=10)
+
+    def process_friends(self):
+        """ Process all the friends """
+        for friend in self.friends:
+            try:
+                if self.friends[friend].user_info.lang:
+                    self.friends_lang[self.friends[friend].user_info.lang] += 1
+                if self.friends[friend].user_info.time_zone:
+                    self.friends_timezone[self.friends[friend].user_info.time_zone] += 1
+            except AttributeError:
+                if args.debug > 2:
+                    print('Processing Friend {}'.format(friend))
+                    print 'The friend does not have data!'
 
     def get_friends_twitter_api(self):
         """ use the api for getting frinds """
@@ -277,242 +356,154 @@ class User():
             pickle.dump(self.friends, open( self.dirpath + self.screen_name + '/' + self.screen_name + '.twitter_friends', "wb" ) )
         # Finally continue processing the friends
 
-    def process_friends(self):
-        """ Process all the friends """
-        for friend in self.friends:
-            try:
-                if self.friends[friend].user_info.lang:
-                    self.friends_lang[self.friends[friend].user_info.lang] += 1
-                if self.friends[friend].user_info.time_zone:
-                    self.friends_timezone[self.friends[friend].user_info.time_zone] += 1
-            except AttributeError:
-                if args.debug > 2:
-                    print('Processing Friend {}'.format(friend))
-                    print 'The friend does not have data!'
+    def print_stats(self, dataset, top=5):
+        """ Displays top values of something by order """
+        sum = numpy.sum(list(dataset.values()))
+        i = 0
+        if sum:
+            sorted_keys = sorted(dataset, key=dataset.get, reverse=True)
+            max_len_key = max([len(x) for x in sorted_keys][:top])  # use to adjust column width
+            for k in sorted_keys:
+                try:
+                    print(("- \033[1m{:<%d}\033[0m {:>6} {:<4}" % max_len_key)
+                          .format(k, dataset[k], "(%d%%)" % ((float(dataset[k]) / sum) * 100)))
+                except:
+                    import ipdb
+                    ipdb.set_trace()
+                i += 1
+                if i >= top:
+                    break
+        else:
+            print("No data")
+        print("")
+
+    def process_tweet(tweet):
+        """ Processing a single Tweet and updating our datasets """
+        global geo_enabled_tweets
+        global retweets
+
+        # Check for filters before processing any further
+        if args.filter and tweet.source:
+            if not args.filter.lower() in tweet.source.lower():
+                return
+
+        tw_date = tweet.created_at
+
+        # Handling retweets
+        try:
+            # We use id to get unique accounts (screen_name can be changed)
+            rt_id_user = tweet.retweeted_status.user.id_str
+            retweeted_users[rt_id_user] += 1
+
+            if tweet.retweeted_status.user.screen_name not in id_screen_names:
+                id_screen_names[rt_id_user] = "@%s" % tweet.retweeted_status.user.screen_name
+
+            retweets += 1
+        except:
+            pass
+
+        # Adding timezone from profile offset to set to local hours
+        if tweet.user.utc_offset and not args.no_timezone:
+            tw_date = (tweet.created_at + datetime.timedelta(seconds=tweet.user.utc_offset))
+
+        if args.utc_offset:
+            tw_date = (tweet.created_at + datetime.timedelta(seconds=args.utc_offset))
+
+        # Updating our activity datasets (distribution maps)
+        activity_hourly["%s:00" % str(tw_date.hour).zfill(2)] += 1
+        activity_weekly[str(tw_date.weekday())] += 1
+
+        # Updating langs
+        detected_langs[tweet.lang] += 1
+
+        # Updating sources
+        detected_sources[tweet.source] += 1
+
+        # Detecting geolocation
+        if tweet.place:
+            geo_enabled_tweets += 1
+            tweet.place.name = tweet.place.name
+            detected_places[tweet.place.name] += 1
+
+        # Updating hashtags list
+        if tweet.entities['hashtags']:
+            for ht in tweet.entities['hashtags']:
+                ht['text'] = "#%s" % ht['text']
+                detected_hashtags[ht['text']] += 1
+
+        # Updating domains list
+        if tweet.entities['urls']:
+            for url in tweet.entities['urls']:
+                domain = urlparse(url['expanded_url']).netloc
+                if domain != "twitter.com":  # removing twitter.com from domains (not very relevant)
+                    detected_domains[domain] += 1
+
+        # Updating mentioned users list
+        if tweet.entities['user_mentions']:
+            for ht in tweet.entities['user_mentions']:
+                mentioned_users[ht['id_str']] += 1
+                if not ht['screen_name'] in id_screen_names:
+                    id_screen_names[ht['id_str']] = "@%s" % ht['screen_name']
+
+
+
+    def print_charts(dataset, title, weekday=False):
+        """ Prints nice charts based on a dict {(key, value), ...} """
+        chart = []
+        keys = sorted(dataset.keys())
+        mean = numpy.mean(list(dataset.values()))
+        median = numpy.median(list(dataset.values()))
+
+        def int_to_weekday(day):
+            weekdays = "Monday Tuesday Wednesday Thursday Friday Saturday Sunday".split()
+            return weekdays[int(day) % len(weekdays)]
+
+        for key in keys:
+            if (dataset[key] >= median * 1.33):
+                displayed_key = "%s (\033[92m+\033[0m)" % (int_to_weekday(key) if weekday else key)
+            elif (dataset[key] <= median * 0.66):
+                displayed_key = "%s (\033[91m-\033[0m)" % (int_to_weekday(key) if weekday else key)
+            else:
+                displayed_key = (int_to_weekday(key) if weekday else key)
+
+            chart.append((displayed_key, dataset[key]))
+
+        thresholds = {
+            int(mean): Gre, int(mean * 2): Yel, int(mean * 3): Red,
+        }
+        data = hcolor(chart, thresholds)
+
+        graph = Pyasciigraph(
+            separator_length=4,
+            multivalue=False,
+            human_readable='si',
+        )
+
+        for line in graph.graph(title, data):
+            print('{}'.format(line))
+        print("")
 
 class Tweet():
     """
     A class for storing tweet data
     """
-    def __init__():
+    def __init__(self, status):
         self.date = None
-
-activity_hourly = {
-    ("%2i:00" % i).replace(" ", "0"): 0 for i in range(24)
-}
-
-activity_weekly = {
-    "%i" % i: 0 for i in range(7)
-}
-
-
-
-def process_tweet(tweet):
-    """ Processing a single Tweet and updating our datasets """
-    global geo_enabled_tweets
-    global retweets
-
-    # Check for filters before processing any further
-    if args.filter and tweet.source:
-        if not args.filter.lower() in tweet.source.lower():
-            return
-
-    tw_date = tweet.created_at
-
-    # Handling retweets
-    try:
-        # We use id to get unique accounts (screen_name can be changed)
-        rt_id_user = tweet.retweeted_status.user.id_str
-        retweeted_users[rt_id_user] += 1
-
-        if tweet.retweeted_status.user.screen_name not in id_screen_names:
-            id_screen_names[rt_id_user] = "@%s" % tweet.retweeted_status.user.screen_name
-
-        retweets += 1
-    except:
-        pass
-
-    # Adding timezone from profile offset to set to local hours
-    if tweet.user.utc_offset and not args.no_timezone:
-        tw_date = (tweet.created_at + datetime.timedelta(seconds=tweet.user.utc_offset))
-
-    if args.utc_offset:
-        tw_date = (tweet.created_at + datetime.timedelta(seconds=args.utc_offset))
-
-    # Updating our activity datasets (distribution maps)
-    activity_hourly["%s:00" % str(tw_date.hour).zfill(2)] += 1
-    activity_weekly[str(tw_date.weekday())] += 1
-
-    # Updating langs
-    detected_langs[tweet.lang] += 1
-
-    # Updating sources
-    detected_sources[tweet.source] += 1
-
-    # Detecting geolocation
-    if tweet.place:
-        geo_enabled_tweets += 1
-        tweet.place.name = tweet.place.name
-        detected_places[tweet.place.name] += 1
-
-    # Updating hashtags list
-    if tweet.entities['hashtags']:
-        for ht in tweet.entities['hashtags']:
-            ht['text'] = "#%s" % ht['text']
-            detected_hashtags[ht['text']] += 1
-
-    # Updating domains list
-    if tweet.entities['urls']:
-        for url in tweet.entities['urls']:
-            domain = urlparse(url['expanded_url']).netloc
-            if domain != "twitter.com":  # removing twitter.com from domains (not very relevant)
-                detected_domains[domain] += 1
-
-    # Updating mentioned users list
-    if tweet.entities['user_mentions']:
-        for ht in tweet.entities['user_mentions']:
-            mentioned_users[ht['id_str']] += 1
-            if not ht['screen_name'] in id_screen_names:
-                id_screen_names[ht['id_str']] = "@%s" % ht['screen_name']
-
-def print_stats(dataset, top=5):
-    """ Displays top values by order """
-    sum = numpy.sum(list(dataset.values()))
-    i = 0
-    if sum:
-        sorted_keys = sorted(dataset, key=dataset.get, reverse=True)
-        max_len_key = max([len(x) for x in sorted_keys][:top])  # use to adjust column width
-        for k in sorted_keys:
-            try:
-                print(("- \033[1m{:<%d}\033[0m {:>6} {:<4}" % max_len_key)
-                      .format(k, dataset[k], "(%d%%)" % ((float(dataset[k]) / sum) * 100)))
-            except:
-                import ipdb
-                ipdb.set_trace()
-            i += 1
-            if i >= top:
-                break
-    else:
-        print("No data")
-    print("")
-
-
-def print_charts(dataset, title, weekday=False):
-    """ Prints nice charts based on a dict {(key, value), ...} """
-    chart = []
-    keys = sorted(dataset.keys())
-    mean = numpy.mean(list(dataset.values()))
-    median = numpy.median(list(dataset.values()))
-
-    def int_to_weekday(day):
-        weekdays = "Monday Tuesday Wednesday Thursday Friday Saturday Sunday".split()
-        return weekdays[int(day) % len(weekdays)]
-
-    for key in keys:
-        if (dataset[key] >= median * 1.33):
-            displayed_key = "%s (\033[92m+\033[0m)" % (int_to_weekday(key) if weekday else key)
-        elif (dataset[key] <= median * 0.66):
-            displayed_key = "%s (\033[91m-\033[0m)" % (int_to_weekday(key) if weekday else key)
-        else:
-            displayed_key = (int_to_weekday(key) if weekday else key)
-
-        chart.append((displayed_key, dataset[key]))
-
-    thresholds = {
-        int(mean): Gre, int(mean * 2): Yel, int(mean * 3): Red,
-    }
-    data = hcolor(chart, thresholds)
-
-    graph = Pyasciigraph(
-        separator_length=4,
-        multivalue=False,
-        human_readable='si',
-    )
-
-    for line in graph.graph(title, data):
-        print('{}'.format(line))
-    print("")
-
-
-def main():
-
-    return True
-
-    # Get specific data
-    try:
-        censored = user_info.withheld_in_countries
-    except Exception as e:
-        censored = 'None'
-    print("[+] Censored in countries : \033[1m%s\033[0m" % censored)
-
-    if user_info.utc_offset is None:
-        print("[\033[91m!\033[0m] Can't get specific timezone for this user")
-
-    if args.utc_offset:
-        print("[\033[91m!\033[0m] Applying timezone offset %d (--utc-offset)" % args.utc_offset)
-
-    if args.summary:
-        return True
-
-    # Will retreive all Tweets from account (or max limit)
-    num_tweets = numpy.amin([args.limit, user_info.statuses_count])
-    print("[+] Retrieving last %d tweets..." % num_tweets)
-
-    # Download tweets
-    get_tweets(twitter_api, args.name, limit=num_tweets)
-    print("[+] Downloaded %d tweets" % (num_tweets))
-
-    # Checking if we have enough data (considering it's good to have at least 30 days of data)
-
-    # Print activity distrubution charts
-    print_charts(activity_hourly, "Daily activity distribution (per hour)")
-    print_charts(activity_weekly, "Weekly activity distribution (per day)", weekday=True)
-
-    print("[+] Detected languages (top 5)")
-    print_stats(detected_langs)
-
-    print("[+] Detected sources (top 10)")
-    print_stats(detected_sources, top=10)
-
-    print("[+] There are \033[1m%d\033[0m geo enabled tweet(s)" % geo_enabled_tweets)
-    if len(detected_places) != 0:
-        print("[+] Detected places (top 10)")
-        print_stats(detected_places, top=10)
-
-    print("[+] Top 10 hashtags")
-    print_stats(detected_hashtags, top=10)
-
-    if num_tweets > 0:
-        print("[+] @%s did \033[1m%d\033[0m RTs out of %d tweets (%.1f%%)" % (args.name, retweets, num_tweets, (float(retweets) * 100 / num_tweets)))
-
-    # Converting users id to screen_names
-    retweeted_users_names = {}
-    for k in retweeted_users.keys():
-        retweeted_users_names[id_screen_names[k]] = retweeted_users[k]
-
-    print("[+] Top 5 most retweeted users")
-    print_stats(retweeted_users_names, top=5)
-
-    mentioned_users_names = {}
-    for k in mentioned_users.keys():
-        mentioned_users_names[id_screen_names[k]] = mentioned_users[k]
-    print("[+] Top 5 most mentioned users")
-    print_stats(mentioned_users_names, top=5)
-
-    print("[+] Most referenced domains (from URLs)")
-    print_stats(detected_domains, top=6)
-
+        self.stauts = status
+        self.activity_hourly = { ("%2i:00" % i).replace(" ", "0"): 0 for i in range(24) }
+        self.activity_weekly = { "%i" % i: 0 for i in range(7) }
 
 def plot_users(users, dirpath):
     """ Read the friends of these users from a file and plot a graph"""
     print('Plotting a unique graph for all users')
     #pygraph = pydot.Dot(graph_type='graph', resolution='1400000')
-    pygraph = pydot.Dot(graph_type='graph', resolution='32000')
-    pygraph.set('center', '1')
-    pygraph.set('ratio', 'auto')
+    #pygraph = pydot.Dot(graph_type='graph', resolution='32000')
+    pygraph = pydot.Dot(graph_type='graph', resolution='300')
+    #pygraph.set('center', '1')
+    #pygraph.set('ratio', 'auto')
     pygraph.set_fontsize('21')
-    pygraph.set_ranksep('4 equally')
-    pygraph.set_rankdir('LR')
+    #pygraph.set_ranksep('4 equally')
+    #pygraph.set_rankdir('LR')
     counter_papa = {}
     color_node = {}
     counter_for_user = 0
@@ -621,6 +612,7 @@ def plot_users(users, dirpath):
         print ('Share 10 followers: Aquamarine')
         print ('Share >10 followers: White')
     pygraph.write_png('graph.png')
+    pygraph.write_dot('graph.dot')
     # Node methods
     # 'add_style', 'create_attribute_methods', 'get', 'get_URL', 'get_attributes', 
     # 'get_color', 'get_colorscheme', 'get_comment', 'get_distortion', 'get_fillcolor', 
@@ -696,7 +688,6 @@ def plot_users(users, dirpath):
 if __name__ == '__main__':
     try:
 	set_output_encoding()
-
         # Process Parameters
         parser = argparse.ArgumentParser(description="Simple Twitter Profile Analyzer (https://github.com/x0rz/tweets_analyzer) version %s" % __version__, usage='%(prog)s -n <screen_name> [options]')
         parser.add_argument('-l', '--limit', metavar='N', type=int, default=1000, help='limit the number of tweets to retreive (default=1000)')
@@ -708,11 +699,12 @@ if __name__ == '__main__':
         parser.add_argument('-s', '--nosummary', action='store_true', default=False, help='Do not show the summary of the user.)')
         parser.add_argument('-F', '--quickfollowers', action='store_true', help='Print only a very short summary about the number of followers.')
         parser.add_argument('-c', '--color', action='store_true', help='Use colors when printing')
-        parser.add_argument('-N', '--numfriends', action='store', help='Max amount of friends to retrieve when -r is used. Defaults to 200. Use -1 to retrieve all of them. Warning! this can take long, since twitter limits 700 friends requests every 15mins approx.', default=200, type=int)
+        parser.add_argument('-N', '--numfriends', action='store', help='Max amount of friends to retrieve when -r is used. Defaults to 200. Use -1 to retrieve all of them. Warning! this can take long, since twitter limits 700 friends requests every 15mins approx. If you use -g for the graph, then this options selects the minimum amount of shared friends to put in the graph as nodes.', default=200, type=int)
         parser.add_argument('-g', '--graphusers', action='store_true', help='Get the list of users specified with -n, read their _offline_ list of users, and create a unique graph for all of them and their shared friends..')
         parser.add_argument('-o', '--offline', action='store_true', default=False, help='Use the offline data stored in cache for all the actions. Do not retrieve them from Twitter (use after you retrieved it at least once).')
         parser.add_argument('-L', '--lastfriend', action='store', type=int, help='Last friend we retrieved before, to continue downloading friends after they.')
         parser.add_argument('-d', '--debug', action='store', type=int, default=0, help='Debug level.')
+        parser.add_argument('-t', '--maxtweets', action='store', type=int, default=1000, help='Maximum amount of tweets to download for analysis per user.')
         args = parser.parse_args()
 
         # The path everyone uses to access the cache
@@ -748,7 +740,7 @@ if __name__ == '__main__':
                     except IOError:
                         user = User(name)
                 user.dirpath = dirpath
-                # Get basic info
+                # Get basic info from twitter if we are not offline
                 if not args.offline:
                     if args.debug > 1:
                         print('Getting basic twitter info.')
@@ -756,12 +748,11 @@ if __name__ == '__main__':
                 # Only show the amount of friends
                 if args.quickfollowers:
                     user.print_followers()
-                # Print a Summary
+                # By default, print a Summary of the account, including the friends
                 elif not args.nosummary:
                     user.print_summary(args.color)
-                    user.analyze_friends(args.numfriends, args.offline)
-                # Appart for the rest, do we have x
-                if args.friends:
+                # Get the people followed by this user.
+                elif args.friends:
                     user.get_friends(twitter_api, name, args.numfriends, args.offline)
                 # Store this user in our disk cache
                 pickle.dump(user, open( dirpath + name + '/' + name + '.data', "wb" ) )
@@ -772,7 +763,9 @@ if __name__ == '__main__':
         # TODO
         # Finish the summary as before
         # Add better colors to dot, https://www.graphviz.org/doc/info/colors.html
-        # Add when the user was created.
+        # Add when the user was created in twitter.
+        # Add if they have an image or not to the summary
+        # Give me one user and monitor it in real time continually. Store new and old followers, etc.
 
     except tweepy.error.TweepError as e:
         print("[\033[91m!\033[0m] Twitter error: %s" % e)
