@@ -36,6 +36,7 @@ from urlparse import urlparse
 from secrets import consumer_key, consumer_secret, access_token, access_token_secret
 import pydot 
 import pickle
+import shutil
 
 __version__ = '0.3'
 
@@ -65,16 +66,17 @@ class User():
         self.screen_name = screen_name
         self.creation_time = datetime.datetime.now()
         self.tweets = {}
-        self.detected_langs = collections.Counter()
-        self.detected_sources = collections.Counter()
-        self.detected_places = collections.Counter()
+        self.tweets_detected_langs = collections.Counter()
+        self.tweets_detected_sources = collections.Counter()
+        self.tweets_detected_places = collections.Counter()
         self.geo_enabled_tweets = 0
-        self.detected_hashtags = collections.Counter()
-        self.detected_domains = collections.Counter()
-        self.detected_timezones = collections.Counter()
+        self.tweets_detected_hashtags = collections.Counter()
+        self.tweets_detected_domains = collections.Counter()
+        self.tweets_detected_timezones = collections.Counter()
         self.retweets = 0
         self.retweeted_users = collections.Counter()
-        self.mentioned_users = collections.Counter()
+        self.tweets_mentioned_users = collections.Counter()
+        self.tweets_mentioned_users_names = {}
         self.id_screen_names = {}
         self.friends_timezone = collections.Counter()
         self.friends_lang = collections.Counter()
@@ -84,11 +86,12 @@ class User():
         self.user_info = False
         # If the user is protected
         self.protected = False
+        self.activity_hourly = { ("%2i:00" % i).replace(" ", "0"): 0 for i in range(24) }
+        self.activity_weekly = { "%i" % i: 0 for i in range(7) }
 
     def set_twitter_info(self, data):
         """ To call if you first obtained the data from twitter, you created a user and now you want to store it """
         #self.user_info = copy.deepcopy(data)
-        self.user_info = data
 
     def get_twitter_info(self):
         """ To call if you created this user only with a name, and want more data """
@@ -110,64 +113,179 @@ class User():
     def get_tweets(self):
         """ Download Tweets from username account """
         num_tweets = numpy.amin([args.maxtweets, self.user_info.statuses_count])
-        # Download tweets
-        print('[+] Downloading {} tweets...'.format(num_tweets))
-        for status in tqdm(tweepy.Cursor(twitter_api.user_timeline, screen_name=self.screen_name).items(num_tweets), unit="tw", total=num_tweets):
-            newTweet = Tweet(status)
-            newTweet.process_tweet(status)
+        if args.offline:
+            # Get the tweets from the cache
+            return True
+        else:
+            # Download tweets
+            print('[+] Downloading {} tweets...'.format(num_tweets))
+            try:
+                if len(self.tweets) != self.user_info.statuses_count:
+                    for status in tqdm(tweepy.Cursor(twitter_api.user_timeline, screen_name=self.screen_name).items(num_tweets), unit="tw", total=num_tweets):
+                        # Create a new twit
+                        self.tweets[status.id] = status
+                else:
+                    # The number of previous tweets and current tweets is the same, do not download them
+                    print('The number of tweets stored in the cache is the same as the current number of tweets. Not dowloading.')
+                return True
+            except tweepy.error.TweepError as e:
+                print e
+                if e[0][0]['code'] == 50: # 50 is user not found
+                    print('User not found')
+                    return False
+                elif e[0][0]['code'] == 63: # your account is suspended
+                    print('User has been suspended')
+                    return False
+                elif e[0][0]['code'] == 88: 
+                    print('This user is protected and we can not get its data.')
+                    self.protected = True
+                    return False
 
     def print_summary(self, color):
         """
         Print a summary of the account
         """
+        # Print basic info
         self.print_basic_info(color)
-        #self.print_tweets()
+        # Print info about the tweets
+        self.print_tweets()
+        # Print info about the friends
         self.print_friends_analysis()
 
     def print_tweets(self):
-        self.get_tweets()
-        self.analyze_tweets()
-        self.print_tweets()
+        """ Get the tweets and print them"""
+        # Get the tweets first
+        if self.get_tweets():
+            # Analyze the tweets
+            self.process_tweets()
+            # Print them
+            self.print_tweets_info()
 
-    def print_charts(self):
+    def process_tweets(self):
+        """ Processing a single Tweet and updating our datasets """
+        self.tweets_detected_langs = collections.Counter()
+        self.tweets_detected_sources = collections.Counter()
+        self.tweets_detected_places = collections.Counter()
+        self.geo_enabled_tweets = 0
+        self.tweets_detected_hashtags = collections.Counter()
+        self.tweets_detected_domains = collections.Counter()
+        self.tweets_detected_timezones = collections.Counter()
+        self.tweets_mentioned_users = collections.Counter()
+        self.tweets_mentioned_users_names = {}
+        for id in self.tweets:
+            tweet = self.tweets[id]
+            tw_date = tweet.created_at
+            # Handling retweets
+            """
+            try:
+                # We use id to get unique accounts (screen_name can be changed)
+                rt_id_user = tweet.retweeted_status.user.id_str
+                retweeted_users[rt_id_user] += 1
+                if tweet.retweeted_status.user.screen_name not in id_screen_names:
+                    id_screen_names[rt_id_user] = "@%s" % tweet.retweeted_status.user.screen_name
 
-        # Checking if we have enough data (considering it's good to have at least 30 days of data)
+                retweets += 1
+            except:
+                pass
+            """
+            # Adding timezone from profile offset to set to local hours
+            if tweet.user.utc_offset:
+                tw_date = (tweet.created_at + datetime.timedelta(seconds=tweet.user.utc_offset))
+            if args.utc_offset:
+                tw_date = (tweet.created_at + datetime.timedelta(seconds=args.utc_offset))
+            # Updating our activity datasets (distribution maps)
+            self.activity_hourly["{}:00".format(str(tw_date.hour).zfill(2))] += 1
+            self.activity_weekly[str(tw_date.weekday())] += 1
+            # Updating langs
+            try:
+                self.tweets_detected_langs[tweet.lang] += 1
+            except KeyError:
+                self.tweets_detected_langs[tweet.lang] = 1
+            # Updating sources
+            try:
+                self.tweets_detected_sources[tweet.source] += 1
+            except KeyError:
+                self.tweets_detected_sources[tweet.source] = 1
+            # Detecting geolocation
+            if tweet.place:
+                self.geo_enabled_tweet += 1
+                try:
+                    self.tweets_detected_places[tweet.place.name] += 1
+                except KeyError:
+                    self.tweets_detected_places[tweet.place.name] = 1
+            # Updating hashtags list
+            if tweet.entities['hashtags']:
+                for ht in tweet.entities['hashtags']:
+                    #ht['text'] = "#{}".format(ht['text'])
+                    try:
+                        self.tweets_detected_hashtags[ht['text']] += 1
+                    except KeyError:
+                        self.tweets_detected_hashtags[ht['text']] = 1
+            # Updating domains list
+            if tweet.entities['urls']:
+                for url in tweet.entities['urls']:
+                    domain = urlparse(url['expanded_url']).netloc
+                    if domain != "twitter.com":  # removing twitter.com from domains (not very relevant)
+                        try:
+                            self.tweets_detected_domains[domain] += 1
+                        except KeyError:
+                            self.tweets_detected_domains[domain] = 1
+            # Updating mentioned users list
+            if tweet.entities['user_mentions']:
+                for ht in tweet.entities['user_mentions']:
+                    self.tweets_mentioned_users[ht['id_str']] += 1
+                    self.tweets_mentioned_users_names[ht['id_str']] = ht['screen_name']
+                # Change the ids for names
+                self.tweets_mentioned_users[self.tweets_mentioned_users_names[ht['id_str']]] = self.tweets_mentioned_users[ht['id_str']] 
 
+    def print_tweets_info(self):
+        """ Output the tweets"""
+        # truncated=False, # text=u'Get th' # is_quote_status=False, # in_reply_to_status_id=None, # id=963923415663919104, # favorite_count=2, # '_json', # 'author', # 'contributors', # 'coordinates', # 'created_at', # 'destroy', # 'entities', # 'favorite', # 'favorite_count', # 'favorited', # 'geo', # 'id', # 'id_str', # 'in_reply_to_screen_name', # 'in_reply_to_status_id', # 'in_reply_to_status_id_str', # 'in_reply_to_user_id', # 'in_reply_to_user_id_str', # 'is_quote_status', # 'lang', # 'parse', # 'parse_list', # 'place', # 'possibly_sensitive', # 'retweet', # 'retweet_count', # 'retweeted', # 'retweets', # 'source', # 'source_url', # 'text', # 'truncated', # 'user' # source_url=u'http://twitter.com', 
+        print("[+] Languages from {} Tweets (top 5)".format(len(self.tweets)))
+        self.print_stats(self.tweets_detected_langs)
+        print("[+] Sources from {} Tweets (top 5)".format(len(self.tweets)))
+        self.print_stats(self.tweets_detected_sources)
+        print("[+] Places from {} Tweets (top 5)".format(len(self.tweets)))
+        self.print_stats(self.tweets_detected_places)
+        #self.print_stats(self.geo_enabled_tweets)
+        print("[+] HashTags from {} Tweets (top 5)".format(len(self.tweets)))
+        self.print_stats(self.tweets_detected_hashtags)
+        print("[+] Domains from {} Tweets (top 5)".format(len(self.tweets)))
+        self.print_stats(self.tweets_detected_domains)
+        print("[+] Timezones from {} Tweets (top 5)".format(len(self.tweets)))
+        self.print_stats(self.tweets_detected_timezones)
+        #print(self.tweets[id].geo_enabled_tweet)
+        print("[+] Mentioned Users from {} Tweets (top 5)".format(len(self.tweets)))
+        self.print_stats(self.tweets_mentioned_users)
         # Print activity distrubution charts
-        print_charts(activity_hourly, "Daily activity distribution (per hour)")
-        print_charts(activity_weekly, "Weekly activity distribution (per day)", weekday=True)
+        #self.print_charts(activity_hourly, "Daily activity distribution (per hour)")
+        #self.print_charts(activity_weekly, "Weekly activity distribution (per day)", weekday=True)
 
+    def print_more_infos(self):
+        """ Print charts """
         print("[+] Detected languages (top 5)")
         print_stats(detected_langs)
-
         print("[+] Detected sources (top 10)")
         print_stats(detected_sources, top=10)
-
         print("[+] There are \033[1m%d\033[0m geo enabled tweet(s)" % geo_enabled_tweets)
         if len(detected_places) != 0:
             print("[+] Detected places (top 10)")
             print_stats(detected_places, top=10)
-
         print("[+] Top 10 hashtags")
         print_stats(detected_hashtags, top=10)
-
         if num_tweets > 0:
             print("[+] @%s did \033[1m%d\033[0m RTs out of %d tweets (%.1f%%)" % (args.name, retweets, num_tweets, (float(retweets) * 100 / num_tweets)))
-
         # Converting users id to screen_names
         retweeted_users_names = {}
         for k in retweeted_users.keys():
             retweeted_users_names[id_screen_names[k]] = retweeted_users[k]
-
         print("[+] Top 5 most retweeted users")
         print_stats(retweeted_users_names, top=5)
-
         mentioned_users_names = {}
         for k in mentioned_users.keys():
             mentioned_users_names[id_screen_names[k]] = mentioned_users[k]
         print("[+] Top 5 most mentioned users")
         print_stats(mentioned_users_names, top=5)
-
         print("[+] Most referenced domains (from URLs)")
         print_stats(detected_domains, top=6)
 
@@ -201,6 +319,7 @@ class User():
         print('[+] Protected      : {}'.format(bold(str(self.user_info.protected))))
         print('[+] Screen Name    : {}'.format(bold(self.screen_name)))
         print('[+] # Tweets       : {}'.format(bold(str(self.user_info.statuses_count))))
+        print('[+] # Tweets cache : {}'.format(bold(str(len(self.tweets)))))
         print('[+] URL            : {}'.format(bold(str(self.user_info.url))))
         print('[+] Verified?      : {}'.format(bold(str(self.user_info.verified))))
         print('[+] Tweets liked   : {}'.format(bold(str(self.user_info.favourites_count))))
@@ -209,7 +328,6 @@ class User():
         except Exception as e:
             censored = 'None'
         print('[+] Censored in countries : {}'.format(censored))
-
         print('')
 
     def print_followers(self):
@@ -227,9 +345,9 @@ class User():
             max_friends = numpy.amin([self.user_info.friends_count, args.numfriends])
             print('[+] Analyzing friends.')
             self.process_friends()
-            print("[+] Friends languages")
+            print("[+] Friends languages (top 10)")
             self.print_stats(self.friends_lang, top=10)
-            print("[+] Friends timezones")
+            print("[+] Friends timezones (top 10)")
             self.print_stats(self.friends_timezone, top=10)
 
     def process_friends(self):
@@ -334,7 +452,6 @@ class User():
                                 # catch all? What are we doing here?
                                 print('Weird catch. Error {}'.format(e))
                                 print('Save friends.')
-                                #pickle.dump(self.friends, friends_file_fd )
                                 pickle.dump(self.friends, open( self.dirpath + self.screen_name + '/' + self.screen_name + '.twitter_friends', "wb" ) )
                             UserFriend = User(friend.screen_name)
                             UserFriend.set_twitter_info(friend)
@@ -344,15 +461,12 @@ class User():
                         except KeyboardInterrupt:
                             # Print Summary of detections in the last Time Window
                             print('Keyboard Interrupt. Storing the friends')
-                            #pickle.dump(self.friends, friends_file_fd )
                             pickle.dump(self.friends, open( self.dirpath + self.screen_name + '/' + self.screen_name + '.twitter_friends', "wb" ) )
                             raise
                 # Between groups save friends
-                #pickle.dump(self.friends, friends_file_fd )
                 pickle.dump(self.friends, open( self.dirpath + self.screen_name + '/' + self.screen_name + '.twitter_friends', "wb" ) )
                 amount_groups += 1
             # Store the friends at the end
-            #pickle.dump(self.friends, friends_file_fd )
             pickle.dump(self.friends, open( self.dirpath + self.screen_name + '/' + self.screen_name + '.twitter_friends', "wb" ) )
         # Finally continue processing the friends
 
@@ -377,87 +491,15 @@ class User():
             print("No data")
         print("")
 
-    def process_tweet(tweet):
-        """ Processing a single Tweet and updating our datasets """
-        global geo_enabled_tweets
-        global retweets
-
-        # Check for filters before processing any further
-        if args.filter and tweet.source:
-            if not args.filter.lower() in tweet.source.lower():
-                return
-
-        tw_date = tweet.created_at
-
-        # Handling retweets
-        try:
-            # We use id to get unique accounts (screen_name can be changed)
-            rt_id_user = tweet.retweeted_status.user.id_str
-            retweeted_users[rt_id_user] += 1
-
-            if tweet.retweeted_status.user.screen_name not in id_screen_names:
-                id_screen_names[rt_id_user] = "@%s" % tweet.retweeted_status.user.screen_name
-
-            retweets += 1
-        except:
-            pass
-
-        # Adding timezone from profile offset to set to local hours
-        if tweet.user.utc_offset and not args.no_timezone:
-            tw_date = (tweet.created_at + datetime.timedelta(seconds=tweet.user.utc_offset))
-
-        if args.utc_offset:
-            tw_date = (tweet.created_at + datetime.timedelta(seconds=args.utc_offset))
-
-        # Updating our activity datasets (distribution maps)
-        activity_hourly["%s:00" % str(tw_date.hour).zfill(2)] += 1
-        activity_weekly[str(tw_date.weekday())] += 1
-
-        # Updating langs
-        detected_langs[tweet.lang] += 1
-
-        # Updating sources
-        detected_sources[tweet.source] += 1
-
-        # Detecting geolocation
-        if tweet.place:
-            geo_enabled_tweets += 1
-            tweet.place.name = tweet.place.name
-            detected_places[tweet.place.name] += 1
-
-        # Updating hashtags list
-        if tweet.entities['hashtags']:
-            for ht in tweet.entities['hashtags']:
-                ht['text'] = "#%s" % ht['text']
-                detected_hashtags[ht['text']] += 1
-
-        # Updating domains list
-        if tweet.entities['urls']:
-            for url in tweet.entities['urls']:
-                domain = urlparse(url['expanded_url']).netloc
-                if domain != "twitter.com":  # removing twitter.com from domains (not very relevant)
-                    detected_domains[domain] += 1
-
-        # Updating mentioned users list
-        if tweet.entities['user_mentions']:
-            for ht in tweet.entities['user_mentions']:
-                mentioned_users[ht['id_str']] += 1
-                if not ht['screen_name'] in id_screen_names:
-                    id_screen_names[ht['id_str']] = "@%s" % ht['screen_name']
-
-
-
     def print_charts(dataset, title, weekday=False):
         """ Prints nice charts based on a dict {(key, value), ...} """
         chart = []
         keys = sorted(dataset.keys())
         mean = numpy.mean(list(dataset.values()))
         median = numpy.median(list(dataset.values()))
-
         def int_to_weekday(day):
             weekdays = "Monday Tuesday Wednesday Thursday Friday Saturday Sunday".split()
             return weekdays[int(day) % len(weekdays)]
-
         for key in keys:
             if (dataset[key] >= median * 1.33):
                 displayed_key = "%s (\033[92m+\033[0m)" % (int_to_weekday(key) if weekday else key)
@@ -465,33 +507,19 @@ class User():
                 displayed_key = "%s (\033[91m-\033[0m)" % (int_to_weekday(key) if weekday else key)
             else:
                 displayed_key = (int_to_weekday(key) if weekday else key)
-
             chart.append((displayed_key, dataset[key]))
-
         thresholds = {
             int(mean): Gre, int(mean * 2): Yel, int(mean * 3): Red,
         }
         data = hcolor(chart, thresholds)
-
         graph = Pyasciigraph(
             separator_length=4,
             multivalue=False,
             human_readable='si',
         )
-
         for line in graph.graph(title, data):
             print('{}'.format(line))
         print("")
-
-class Tweet():
-    """
-    A class for storing tweet data
-    """
-    def __init__(self, status):
-        self.date = None
-        self.stauts = status
-        self.activity_hourly = { ("%2i:00" % i).replace(" ", "0"): 0 for i in range(24) }
-        self.activity_weekly = { "%i" % i: 0 for i in range(7) }
 
 def plot_users(users, dirpath):
     """ Read the friends of these users from a file and plot a graph"""
@@ -613,77 +641,6 @@ def plot_users(users, dirpath):
         print ('Share >10 followers: White')
     pygraph.write_png('graph.png')
     pygraph.write_dot('graph.dot')
-    # Node methods
-    # 'add_style', 'create_attribute_methods', 'get', 'get_URL', 'get_attributes', 
-    # 'get_color', 'get_colorscheme', 'get_comment', 'get_distortion', 'get_fillcolor', 
-    # 'get_fixedsize', 'get_fontcolor', 'get_fontname', 'get_fontsize', 'get_group', 'get_height', 
-    # 'get_id', 'get_image', 'get_imagescale', 'get_label', 'get_labelloc', 'get_layer', 
-    # 'get_margin', 'get_name', 'get_nojustify', 'get_orientation', 'get_parent_graph', 'get_penwidth', 
-    # 'get_peripheries', 'get_pin', 'get_port', 'get_pos', 'get_rects', 'get_regular', 'get_root', 
-    # 'get_samplepoints', 'get_sequence', 'get_shape', 'get_shapefile', 'get_showboxes', 'get_sides', 
-    # 'get_skew', 'get_sortv', 'get_style', 'get_target', 'get_texlbl', 'get_texmode', 'get_tooltip', 
-    # 'get_vertices', 'get_width', 'get_z', 'obj_dict', 'set', 'set_URL', 'set_color', 'set_colorscheme', 
-    # 'set_comment', 'set_distortion', 'set_fillcolor', 'set_fixedsize', 'set_fontcolor', 'set_fontname', 
-    # 'set_fontsize', 'set_group', 'set_height', 'set_id', 'set_image', 'set_imagescale', 'set_label', 
-    # 'set_labelloc', 'set_layer', 'set_margin', 'set_name', 'set_nojustify', 'set_orientation', 
-    # 'set_parent_graph', 'set_penwidth', 'set_peripheries', 'set_pin', 'set_pos', 'set_rects', 
-    # 'set_regular', 'set_root', 'set_samplepoints', 'set_sequence', 'set_shape', 'set_shapefile', 'set_showboxes', 
-    # 'set_sides', 'set_skew', 'set_sortv', 'set_style', 'set_target', 'set_texlbl', 'set_texmode', 
-    # 'set_tooltip', 'set_vertices', 'set_width', 'set_z', 'to_string']
-
-    # Graph methods
-    #pygraph.write_dot('{}.graph.xdot'.format(users))
-    # 'add_edge', 'add_node', 'add_subgraph', 'create', 'create_attribute_methods', 
-    # 'create_canon', 'create_cmap', 'create_cmapx', 'create_cmapx_np', 'create_dia', 
-    # 'create_dot', 'create_fig', 'create_gd', 'create_gd2', 'create_gif', 'create_hpgl', 
-    # 'create_imap', 'create_imap_np', 'create_ismap', 'create_jpe', 'create_jpeg', 
-    # 'create_jpg', 'create_mif', 'create_mp', 'create_pcl', 'create_pdf', 'create_pic', 
-    # 'create_plain', 'create_plain-ext', 'create_png', 'create_ps', 'create_ps2', 'create_svg', 
-    # 'create_svgz', 'create_vml', 'create_vmlz', 'create_vrml', 'create_vtx', 'create_wbmp', 
-    # 'create_xdot', 'create_xlib', 'del_edge', 'del_node', 'formats', 'get', 'get_Damping', 
-    # 'get_K', 'get_URL', 'get_aspect', 'get_attributes', 'get_bb', 'get_bgcolor', 
-    # 'get_center', 'get_charset', 'get_clusterrank', 'get_colorscheme', 'get_comment', 
-    # 'get_compound', 'get_concentrate', 'get_defaultdist', 'get_dim', 'get_dimen', 
-    # 'get_diredgeconstraints', 'get_dpi', 'get_edge', 'get_edge_defaults', 'get_edge_list', 
-    # 'get_edges', 'get_epsilon', 'get_esep', 'get_fontcolor', 'get_fontname', 'get_fontnames', 
-    # 'get_fontpath', 'get_fontsize', 'get_graph_defaults', 'get_graph_type', 'get_id', 'get_label', 
-    # 'get_labeljust', 'get_labelloc', 'get_landscape', 'get_layers', 'get_layersep', 'get_layout', 
-    # 'get_levels', 'get_levelsgap', 'get_lheight', 'get_lp', 'get_lwidth', 'get_margin', 'get_maxiter', 
-    # 'get_mclimit', 'get_mindist', 'get_mode', 'get_model', 'get_mosek', 'get_name', 'get_next_sequence_number', 
-    # 'get_node', 'get_node_defaults', 'get_node_list', 'get_nodes', 'get_nodesep', 'get_nojustify', 
-    # 'get_normalize', 'get_nslimit', 'get_nslimit1', 'get_ordering', 'get_orientation', 'get_outputorder', 
-    # 'get_overlap', 'get_overlap_scaling', 'get_pack', 'get_packmode', 'get_pad', 'get_page', 
-    # 'get_pagedir', 'get_parent_graph', 'get_quadtree', 'get_quantum', 'get_rank', 'get_rankdir', 
-    # 'get_ranksep', 'get_ratio', 'get_remincross', 'get_repulsiveforce', 'get_resolution', 
-    # 'get_root', 'get_rotate', 'get_searchsize', 'get_sep', 'get_sequence', 'get_showboxes', 
-    # 'get_simplify', 'get_size', 'get_smoothing', 'get_sortv', 'get_splines', 'get_start', 
-    # 'get_strict', 'get_stylesheet', 'get_subgraph', 'get_subgraph_list', 'get_subgraphs', 
-    # 'get_suppress_disconnected', 'get_target', 'get_top_graph_type', 'get_truecolor', 
-    # 'get_type', 'get_viewport', 'get_voro_margin', 'obj_dict', 'prog', 'set', 'set_Damping', 
-    # 'set_K', 'set_URL', 'set_aspect', 'set_bb', 'set_bgcolor', 'set_center', 'set_charset', 
-    # 'set_clusterrank', 'set_colorscheme', 'set_comment', 'set_compound', 'set_concentrate', 
-    # 'set_defaultdist', 'set_dim', 'set_dimen', 'set_diredgeconstraints', 'set_dpi', 'set_edge_defaults', 
-    # 'set_epsilon', 'set_esep', 'set_fontcolor', 'set_fontname', 'set_fontnames', 'set_fontpath', 
-    # 'set_fontsize', 'set_graph_defaults', 'set_id', 'set_label', 'set_labeljust', 'set_labelloc', 
-    # 'set_landscape', 'set_layers', 'set_layersep', 'set_layout', 'set_levels', 'set_levelsgap', 
-    # 'set_lheight', 'set_lp', 'set_lwidth', 'set_margin', 'set_maxiter', 'set_mclimit', 'set_mindist', 
-    # 'set_mode', 'set_model', 'set_mosek', 'set_name', 'set_node_defaults', 'set_nodesep', 'set_nojustify', 
-    # 'set_normalize', 'set_nslimit', 'set_nslimit1', 'set_ordering', 'set_orientation', 'set_outputorder', 
-    # 'set_overlap', 'set_overlap_scaling', 'set_pack', 'set_packmode', 'set_pad', 'set_page', 
-    # 'set_pagedir', 'set_parent_graph', 'set_prog', 'set_quadtree', 'set_quantum', 'set_rank', 
-    # 'set_rankdir', 'set_ranksep', 'set_ratio', 'set_remincross', 'set_repulsiveforce', 'set_resolution', 
-    # 'set_root', 'set_rotate', 'set_searchsize', 'set_sep', 'set_sequence', 'set_shape_files', 
-    # 'set_showboxes', 'set_simplify', 'set_size', 'set_smoothing', 'set_sortv', 'set_splines', 
-    # 'set_start', 'set_strict', 'set_stylesheet', 'set_suppress_disconnected', 'set_target', 
-    # 'set_truecolor', 'set_type', 'set_viewport', 'set_voro_margin', 'shape_files', 
-    # 'to_string', 'write', 'write_canon', 'write_cmap', 'write_cmapx', 'write_cmapx_np', 
-    # 'write_dia', 'write_dot', 'write_fig', 'write_gd', 'write_gd2', 'write_gif', 'write_hpgl', 
-    # 'write_imap', 'write_imap_np', 'write_ismap', 'write_jpe', 'write_jpeg', 'write_jpg', 
-    # 'write_mif', 'write_mp', 'write_pcl', 'write_pdf', 'write_pic', 'write_plain', 
-    # 'write_plain-ext', 'write_png', 'write_ps', 'write_ps2', 'write_raw', 'write_svg', 
-    # 'write_svgz', 'write_vml', 'write_vmlz', 'write_vrml', 'write_vtx', 'write_wbmp', 'write_xdot', 'write_xlib'
-
-
 
 if __name__ == '__main__':
     try:
@@ -692,7 +649,6 @@ if __name__ == '__main__':
         parser = argparse.ArgumentParser(description="Simple Twitter Profile Analyzer (https://github.com/x0rz/tweets_analyzer) version %s" % __version__, usage='%(prog)s -n <screen_name> [options]')
         parser.add_argument('-l', '--limit', metavar='N', type=int, default=1000, help='limit the number of tweets to retreive (default=1000)')
         parser.add_argument('-n', '--names', required=False, metavar="screen_names", help='target screen_name. Can be a comma separated list of names for multiple comparisons.')
-        parser.add_argument('-f', '--filter', help='filter by source (ex. -f android will get android tweets only)')
         parser.add_argument('--no-timezone', action='store_true', help='removes the timezone auto-adjustment (default is UTC)')
         parser.add_argument('--utc-offset', type=int, help='manually apply a timezone offset (in seconds)')
         parser.add_argument('-r', '--friends', action='store_true', help='Retrieve the friends of each user and perform an analysis on _their_ data. Use -N to select the amount of friends. Use -o if you want to analyze the offline cached friends. (rate limit = 300 friends max, any user, per 15 mins)')
@@ -705,6 +661,8 @@ if __name__ == '__main__':
         parser.add_argument('-L', '--lastfriend', action='store', type=int, help='Last friend we retrieved before, to continue downloading friends after they.')
         parser.add_argument('-d', '--debug', action='store', type=int, default=0, help='Debug level.')
         parser.add_argument('-t', '--maxtweets', action='store', type=int, default=1000, help='Maximum amount of tweets to download for analysis per user.')
+        parser.add_argument('-x', '--redocache', action='store_true', help='Delete, for this user, the current cache and download again.')
+        parser.add_argument('-i', '--listcacheusers', action='store_true', help='List the users in the cache.')
         args = parser.parse_args()
 
         # The path everyone uses to access the cache
@@ -721,58 +679,72 @@ if __name__ == '__main__':
         twitter_api = tweepy.API(auth)
 
         # Go user by user given
-        for name in args.names.split(','):
-            try:
-                # Create our folder if we need it, and the user object
+        if args.names:
+            for name in args.names.split(','):
                 try:
-                    os.makedirs(dirpath + name)
-                    print('Folders created in {}'.format(dirpath + name))
-                    # The folder Is not there
-                    user = User(name)
-                except OSError:
-                    # Already exists
-                    if args.debug > 1:
-                        print('The user {} exists, loading its data.'.format(name))
-                    # Load what we know from this user
+                    # Should we delete the cache for this user?
+                    if args.redocache:
+                        shutil.rmtree(dirpath + name, ignore_errors=True)
+                    # Create our folder if we need it, and the user object
                     try:
-                        datapath = os.path.expanduser(dirpath + name + '/' + name + '.data')
-                        user = pickle.load(open(datapath, 'rb'))
-                    except IOError:
+                        os.makedirs(dirpath + name)
+                        print('Folders created in {}'.format(dirpath + name))
+                        # The folder Is not there
                         user = User(name)
-                user.dirpath = dirpath
-                # Get basic info from twitter if we are not offline
-                if not args.offline:
-                    if args.debug > 1:
-                        print('Getting basic twitter info.')
-                    user.get_twitter_info()
-                # Only show the amount of friends
-                if args.quickfollowers:
-                    user.print_followers()
-                # By default, print a Summary of the account, including the friends
-                elif not args.nosummary:
-                    user.print_summary(args.color)
-                # Get the people followed by this user.
-                elif args.friends:
-                    user.get_friends(twitter_api, name, args.numfriends, args.offline)
-                # Store this user in our disk cache
-                pickle.dump(user, open( dirpath + name + '/' + name + '.data', "wb" ) )
-            except KeyboardInterrupt:
-                # Print Summary of detections in the last Time Window
-                print('Keyboard Interrupt. Storing the user')
-                pickle.dump(user, open( dirpath + name + '/' + name + '.data', "wb" ) )
+                    except OSError:
+                        # Already exists
+                        if args.debug > 1:
+                            print('The user {} exists, loading its data.'.format(name))
+                        # Load what we know from this user
+                        # We always load the cache, if we are offline or not.
+                        try:
+                            datapath = os.path.expanduser(dirpath + name + '/' + name + '.data')
+                            user = pickle.load(open(datapath, 'rb'))
+                        except IOError:
+                            user = User(name)
+                    user.dirpath = dirpath
+                    # Get basic info from twitter if we are not offline
+                    if not args.offline:
+                        if args.debug > 1:
+                            print('Getting basic twitter info.')
+                        user.get_twitter_info()
+                    # Only show the amount of friends
+                    if args.quickfollowers:
+                        user.print_followers()
+                    # Option by default, print a Summary of the account, including the friends
+                    elif not args.nosummary:
+                        user.print_summary(args.color)
+                    # Get the people followed by this user.
+                    elif args.friends:
+                        user.get_friends(twitter_api, name, args.numfriends, args.offline)
+                    # Store this user in our disk cache
+                    pickle.dump(user, open( dirpath + name + '/' + name + '.data', "wb" ) )
+                except KeyboardInterrupt:
+                    # Print Summary of detections in the last Time Window
+                    print('Keyboard Interrupt. Storing the user')
+                    pickle.dump(user, open( dirpath + name + '/' + name + '.data', "wb" ) )
+        elif args.listcacheusers:
+            # List the cache
+            list_of_users = os.listdir(dirpath)
+            composite_list = [list_of_users[x:x+10] for x in range(0, len(list_of_users),10)]
+            for list in composite_list:
+                for user in list:
+                    print('+ {:17}'.format(user)),
+                print('')
         # TODO
         # Finish the summary as before
-        # Add better colors to dot, https://www.graphviz.org/doc/info/colors.html
         # Add when the user was created in twitter.
         # Add if they have an image or not to the summary
         # Give me one user and monitor it in real time continually. Store new and old followers, etc.
+        # Download the tweets like friends, continusly until we have them all, or a limit.
+        # The language of tweets make it only for not retweeted tweets
 
     except tweepy.error.TweepError as e:
-        print("[\033[91m!\033[0m] Twitter error: %s" % e)
+        print("[\033[91m!\033[0m] Twitter error: {}".format(e))
         try:
             if e[0][0]['code'] == 50:
                 # user not found
-                os.rmdir(dirpath + name)
+                shutil.rmtree(dirpath + name, ignore_errors=True)
         except TypeError:
             if e == 'Not authorized':
                 print('The account of this user is protected, we can not get its friends.')
