@@ -179,6 +179,8 @@ class User():
         self.tweets_mentioned_users = collections.Counter()
         self.retweeted_users = collections.Counter()
         self.retweets = 0
+        self.activity_hourly = { ("%2i:00" % i).replace(" ", "0"): 0 for i in range(24) }
+        self.activity_weekly = { "%i" % i: 0 for i in range(7) }
         for id in self.tweets:
             tweet = self.tweets[id]
             tw_date = tweet.created_at
@@ -352,6 +354,8 @@ class User():
 
     def process_friends(self):
         """ Process all the friends """
+        self.friends_timezone = collections.Counter()
+        self.friends_lang = collections.Counter()
         for friend in self.friends:
             try:
                 if self.friends[friend].user_info.lang:
@@ -392,22 +396,11 @@ class User():
         If offline, do not retrieve from twitter 
         If online and we have in the cache less than the limit, continue downloading from the last friend downloaded
         """
-        # Load the cache of friends. Always
-        if args.debug > 0:
-            print('Loading the cache of friends...')
-        try:
-            friends = pickle.load( open( self.dirpath + self.screen_name + '/' + self.screen_name + '.twitter_friends', "rb" ) )
-            for friend in friends.values():
-                UserFriend = User(friend.screen_name)
-                UserFriend.set_twitter_info(friend.user_info)
-                self.friends[friend.screen_name] = UserFriend
-        except IOError:
-            print('This user does not have a cache of friends yet.')
         # Are we offline?
         if args.debug > 0 and args.offline:
             print('We are in offline mode, so we are not downloading more friends.')
         # If we are not offline and the user is not protected, try to get their friends
-        elif not args.offline and not self.protected:
+        elif not args.offline and not self.protected and len(self.friends) != self.user_info.friends_count:
             # Get the list of friends from twitter
             self.get_friends_twitter_api()
             if args.debug > 0:
@@ -423,12 +416,9 @@ class User():
             friends_to_download = friends_to_continue_download[:args.numfriends]
             print('Friends to download: {}'.format(len(friends_to_download)))
             # We split the friends in groups in case we need to sleep because we are asking to much. Now not so used because we wait for the twitter exception
-            #group_size = 20
-            #splitted_friends = [friends_to_download[x:x+group_size] for x in range(0, len(friends_to_download), group_size) ]
-            #amount_groups = 0
             amount_users = 0
+            # This prints the bar
             with tqdm(total=len(friends_to_download)) as pbar:
-            #for splitted_group in splitted_friends:
                 for friend_id in friends_to_download:
                         try:
                             pbar.update(1)
@@ -442,7 +432,6 @@ class User():
                                 elif e[0][0]['code'] == 88 or e[0][0]['code'] == 50:
                                     print("[+] Rate limit exceeded to get friends data, we will sleep are retry in 15 minutes. The friends so far are stored.")
                                 # Store this user so far
-                                #pickle.dump(self.friends, open( self.dirpath + self.screen_name + '/' + self.screen_name + '.twitter_friends', "wb" ) )
                                 pickle.dump(user, open( dirpath + name + '/' + name + '.data', "wb" ) )
                                 # Sleep
                                 print('Waiting 15 minutes...')
@@ -455,7 +444,6 @@ class User():
                                 # catch all? What are we doing here?
                                 print('Weird error {}'.format(e))
                                 print('Save user just in case.')
-                                #pickle.dump(self.friends, open( self.dirpath + self.screen_name + '/' + self.screen_name + '.twitter_friends', "wb" ) )
                                 pickle.dump(user, open( dirpath + name + '/' + name + '.data', "wb" ) )
                             UserFriend = User(friend.screen_name)
                             UserFriend.set_twitter_info(friend)
@@ -465,15 +453,9 @@ class User():
                         except KeyboardInterrupt:
                             # Print Summary of detections in the last Time Window
                             print('Keyboard Interrupt. Storing the user so far.')
-                            #pickle.dump(self.friends, open( self.dirpath + self.screen_name + '/' + self.screen_name + '.twitter_friends', "wb" ) )
                             pickle.dump(user, open( dirpath + name + '/' + name + '.data', "wb" ) )
                             raise
-                # Between groups save friends
-                #pickle.dump(self.friends, open( self.dirpath + self.screen_name + '/' + self.screen_name + '.twitter_friends', "wb" ) )
-                #pickle.dump(user, open( dirpath + name + '/' + name + '.data', "wb" ) )
-                #amount_groups += 1
             # Store the friends at the end
-            #pickle.dump(self.friends, open( self.dirpath + self.screen_name + '/' + self.screen_name + '.twitter_friends', "wb" ) )
             pickle.dump(user, open( dirpath + name + '/' + name + '.data', "wb" ) )
         # Finally continue processing the friends
 
@@ -734,13 +716,13 @@ if __name__ == '__main__':
                     print('+ {:17}'.format(user)),
                 print('')
         # TODO
-        # Finish the summary as before
         # Add when the user was created in twitter.
         # Add if they have an image or not to the summary
         # Give me one user and monitor it in real time continually. Store new and old followers, etc.
         # Download the tweets like friends, continusly until we have them all, or a limit.
         # The language of tweets make it only for not retweeted tweets
         # For computing user mentions, use ids and not screen names
+        # compare two users
 
     except tweepy.error.TweepError as e:
         print("[\033[91m!\033[0m] Twitter error: {}".format(e))
