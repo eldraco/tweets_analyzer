@@ -38,6 +38,7 @@ import pydot
 import pickle
 import shutil
 
+
 __version__ = '0.3'
 
 def set_output_encoding(encoding='utf-8'):
@@ -76,7 +77,6 @@ class User():
         self.retweets = 0
         self.retweeted_users = collections.Counter()
         self.tweets_mentioned_users = collections.Counter()
-        self.tweets_mentioned_users_names = {}
         self.id_screen_names = {}
         self.friends_timezone = collections.Counter()
         self.friends_lang = collections.Counter()
@@ -91,7 +91,7 @@ class User():
 
     def set_twitter_info(self, data):
         """ To call if you first obtained the data from twitter, you created a user and now you want to store it """
-        #self.user_info = copy.deepcopy(data)
+        self.user_info = data
 
     def get_twitter_info(self):
         """ To call if you created this user only with a name, and want more data """
@@ -128,6 +128,9 @@ class User():
                     # The number of previous tweets and current tweets is the same, do not download them
                     print('The number of tweets stored in the cache is the same as the current number of tweets. Not dowloading.')
                 return True
+            except KeyboardInterrupt:
+                print('User suspended the download of tweets. Continuing with the analysis.')
+                return True
             except tweepy.error.TweepError as e:
                 print e
                 if e[0][0]['code'] == 50: # 50 is user not found
@@ -150,6 +153,7 @@ class User():
         # Print info about the tweets
         self.print_tweets()
         # Print info about the friends
+        self.get_friends()
         self.print_friends_analysis()
 
     def print_tweets(self):
@@ -163,6 +167,8 @@ class User():
 
     def process_tweets(self):
         """ Processing a single Tweet and updating our datasets """
+        # text=u'Get th' # is_quote_status=False, # in_reply_to_status_id=None, # id=963923415663919104, # favorite_count=2, # '_json', # 'author', # 'contributors', # 'coordinates', # 'created_at', # 'destroy', # 'entities', # 'favorite', # 'favorite_count', # 'favorited', # 'geo', # 'id', # 'id_str', # 'in_reply_to_screen_name', # 'in_reply_to_status_id', # 'in_reply_to_status_id_str', # 'in_reply_to_user_id', # 'in_reply_to_user_id_str', # 'is_quote_status', # 'lang', # 'parse', # 'parse_list', # 'place', # 'possibly_sensitive', # 'retweet', # 'retweet_count', # 'retweeted', # 'retweets', # 'source', # 'source_url', # 'text', # 'truncated', # 'user' # source_url=u'http://twitter.com', 
+        # Every time we process, we should reset the counters
         self.tweets_detected_langs = collections.Counter()
         self.tweets_detected_sources = collections.Counter()
         self.tweets_detected_places = collections.Counter()
@@ -171,23 +177,33 @@ class User():
         self.tweets_detected_domains = collections.Counter()
         self.tweets_detected_timezones = collections.Counter()
         self.tweets_mentioned_users = collections.Counter()
-        self.tweets_mentioned_users_names = {}
+        self.retweeted_users = collections.Counter()
+        self.retweets = 0
         for id in self.tweets:
             tweet = self.tweets[id]
             tw_date = tweet.created_at
             # Handling retweets
-            """
+            # How many times the tweet was retweeted?
+            # print(tweet.retweet_count)
+            # How many times the tweet was favorited?
+            # tweet.favorite_count
+            # Was this tweet retweeted by others?
+            # print(tweet.retweeted)
+            # Do something with quoted tweets
+            # print(tweet.is_quote_status)
+            # Is this a reply tweet?
+            # in_reply_to_status_id
+            # Compute the amount of retweets of this user
             try:
-                # We use id to get unique accounts (screen_name can be changed)
+                rtstatus = tweet.retweeted_status
+                # Its a retweet
+                self.retweets += 1
                 rt_id_user = tweet.retweeted_status.user.id_str
-                retweeted_users[rt_id_user] += 1
-                if tweet.retweeted_status.user.screen_name not in id_screen_names:
-                    id_screen_names[rt_id_user] = "@%s" % tweet.retweeted_status.user.screen_name
-
-                retweets += 1
-            except:
+                rt_name_user = tweet.retweeted_status.user.screen_name
+                self.retweeted_users[rt_name_user] += 1
+            except AttributeError:
+                # Its a normal tweet
                 pass
-            """
             # Adding timezone from profile offset to set to local hours
             if tweet.user.utc_offset:
                 tw_date = (tweet.created_at + datetime.timedelta(seconds=tweet.user.utc_offset))
@@ -231,63 +247,45 @@ class User():
                         except KeyError:
                             self.tweets_detected_domains[domain] = 1
             # Updating mentioned users list
+            # The problem is that we should do this with IDs, not with screen names. But it was too dificult.
             if tweet.entities['user_mentions']:
                 for ht in tweet.entities['user_mentions']:
-                    self.tweets_mentioned_users[ht['id_str']] += 1
-                    self.tweets_mentioned_users_names[ht['id_str']] = ht['screen_name']
-                # Change the ids for names
-                self.tweets_mentioned_users[self.tweets_mentioned_users_names[ht['id_str']]] = self.tweets_mentioned_users[ht['id_str']] 
+                    try:
+                        self.tweets_mentioned_users[ht['screen_name']] += 1
+                    except KeyError:
+                        self.tweets_mentioned_users[ht['screen_name']] = 1
 
     def print_tweets_info(self):
         """ Output the tweets"""
-        # truncated=False, # text=u'Get th' # is_quote_status=False, # in_reply_to_status_id=None, # id=963923415663919104, # favorite_count=2, # '_json', # 'author', # 'contributors', # 'coordinates', # 'created_at', # 'destroy', # 'entities', # 'favorite', # 'favorite_count', # 'favorited', # 'geo', # 'id', # 'id_str', # 'in_reply_to_screen_name', # 'in_reply_to_status_id', # 'in_reply_to_status_id_str', # 'in_reply_to_user_id', # 'in_reply_to_user_id_str', # 'is_quote_status', # 'lang', # 'parse', # 'parse_list', # 'place', # 'possibly_sensitive', # 'retweet', # 'retweet_count', # 'retweeted', # 'retweets', # 'source', # 'source_url', # 'text', # 'truncated', # 'user' # source_url=u'http://twitter.com', 
-        print("[+] Languages from {} Tweets (top 5)".format(len(self.tweets)))
+        print("[+] Languages from {} Tweets (top)".format(len(self.tweets)))
         self.print_stats(self.tweets_detected_langs)
-        print("[+] Sources from {} Tweets (top 5)".format(len(self.tweets)))
+        print("[+] Sources from {} Tweets (top)".format(len(self.tweets)))
         self.print_stats(self.tweets_detected_sources)
-        print("[+] Places from {} Tweets (top 5)".format(len(self.tweets)))
+        print("[+] Places from {} Tweets (top)".format(len(self.tweets)))
         self.print_stats(self.tweets_detected_places)
-        #self.print_stats(self.geo_enabled_tweets)
-        print("[+] HashTags from {} Tweets (top 5)".format(len(self.tweets)))
-        self.print_stats(self.tweets_detected_hashtags)
-        print("[+] Domains from {} Tweets (top 5)".format(len(self.tweets)))
+        print("[+] There are {} geo enabled tweet(s)".format(self.geo_enabled_tweets))
+        print('')
+        print("[+] HashTags from {} Tweets (top)".format(len(self.tweets)))
+        self.print_stats(self.tweets_detected_hashtags, top=10)
+        print("[+] Domains from {} Tweets (top)".format(len(self.tweets)))
         self.print_stats(self.tweets_detected_domains)
-        print("[+] Timezones from {} Tweets (top 5)".format(len(self.tweets)))
+        print("[+] Timezones from {} Tweets (top)".format(len(self.tweets)))
         self.print_stats(self.tweets_detected_timezones)
         #print(self.tweets[id].geo_enabled_tweet)
-        print("[+] Mentioned Users from {} Tweets (top 5)".format(len(self.tweets)))
+        print("[+] Mentioned Users from {} Tweets (top)".format(len(self.tweets)))
         self.print_stats(self.tweets_mentioned_users)
+        print("[+] Most retweeted users from {} Tweets (top)".format(len(self.tweets)))
+        self.print_stats(self.retweeted_users)
         # Print activity distrubution charts
-        #self.print_charts(activity_hourly, "Daily activity distribution (per hour)")
-        #self.print_charts(activity_weekly, "Weekly activity distribution (per day)", weekday=True)
+        self.print_charts(self.activity_hourly, "Daily activity distribution (per hour)")
+        self.print_charts(self.activity_weekly, "Weekly activity distribution (per day)", weekday=True)
 
     def print_more_infos(self):
         """ Print charts """
-        print("[+] Detected languages (top 5)")
-        print_stats(detected_langs)
-        print("[+] Detected sources (top 10)")
-        print_stats(detected_sources, top=10)
-        print("[+] There are \033[1m%d\033[0m geo enabled tweet(s)" % geo_enabled_tweets)
-        if len(detected_places) != 0:
-            print("[+] Detected places (top 10)")
-            print_stats(detected_places, top=10)
-        print("[+] Top 10 hashtags")
-        print_stats(detected_hashtags, top=10)
-        if num_tweets > 0:
-            print("[+] @%s did \033[1m%d\033[0m RTs out of %d tweets (%.1f%%)" % (args.name, retweets, num_tweets, (float(retweets) * 100 / num_tweets)))
         # Converting users id to screen_names
         retweeted_users_names = {}
         for k in retweeted_users.keys():
             retweeted_users_names[id_screen_names[k]] = retweeted_users[k]
-        print("[+] Top 5 most retweeted users")
-        print_stats(retweeted_users_names, top=5)
-        mentioned_users_names = {}
-        for k in mentioned_users.keys():
-            mentioned_users_names[id_screen_names[k]] = mentioned_users[k]
-        print("[+] Top 5 most mentioned users")
-        print_stats(mentioned_users_names, top=5)
-        print("[+] Most referenced domains (from URLs)")
-        print_stats(detected_domains, top=6)
 
     def print_basic_info(self, color):
         """
@@ -301,10 +299,12 @@ class User():
                 return text
         if self.protected:
             print('[+] User           : {}'.format(bold('@'+self.screen_name)))
+            print('[+] Twitter ID     : {}'.format(bold(self.user_info.id)))
             print('[+] Date:          : {}'.format(bold(str(self.creation_time))))
             print('[+] Protected      : {}'.format(bold(str(self.protected))))
             return True
         print('[+] User           : {}'.format(bold('@'+self.screen_name)))
+        print('[+] Twitter ID     : {}'.format(bold(self.user_info.id)))
         print('[+] Date:          : {}'.format(bold(str(self.creation_time))))
         print('[+] lang           : {}'.format(bold(self.user_info.lang)))
         print('[+] geo_enabled    : {}'.format(bold(str(self.user_info.geo_enabled))))
@@ -386,8 +386,7 @@ class User():
             except TypeError:
                 print e
 
-
-    def get_friends(self, api, username, limit, offline):
+    def get_friends(self):
         """
         Get friends. Load friends from cache
         If offline, do not retrieve from twitter 
@@ -405,14 +404,15 @@ class User():
         except IOError:
             print('This user does not have a cache of friends yet.')
         # Are we offline?
-        if args.debug > 0 and offline:
+        if args.debug > 0 and args.offline:
             print('We are in offline mode, so we are not downloading more friends.')
         # If we are not offline and the user is not protected, try to get their friends
-        elif not offline and not self.protected:
+        elif not args.offline and not self.protected:
             # Get the list of friends from twitter
             self.get_friends_twitter_api()
-            print('Total amount of friends this user follows: {}'.format(self.user_info.friends_count))
-            print('Total amount of friends downloaded in cache: {}'.format(len(self.friends)))
+            if args.debug > 0:
+                print('Total amount of friends this user follows: {}'.format(self.user_info.friends_count))
+                print('Total amount of friends downloaded in cache: {}'.format(len(self.friends)))
             # If the limit requested is > than the amount we already have, continue downloading from where we left
             if self.last_friend_retrieved_id and self.last_friend_retrieved_id != self.friends_ids[-1]:
                 if args.debug > 0:
@@ -420,27 +420,30 @@ class User():
                 friends_to_continue_download = self.friends_ids[self.friends_ids.index(self.last_friend_retrieved_id):]
             else:
                 friends_to_continue_download = self.friends_ids
-            friends_to_download = friends_to_continue_download[:limit]
+            friends_to_download = friends_to_continue_download[:args.numfriends]
             print('Friends to download: {}'.format(len(friends_to_download)))
             # We split the friends in groups in case we need to sleep because we are asking to much. Now not so used because we wait for the twitter exception
-            group_size = 20
-            splitted_friends = [friends_to_download[x:x+group_size] for x in range(0, len(friends_to_download), group_size) ]
-            amount_groups = 0
+            #group_size = 20
+            #splitted_friends = [friends_to_download[x:x+group_size] for x in range(0, len(friends_to_download), group_size) ]
+            #amount_groups = 0
             amount_users = 0
-            for splitted_group in splitted_friends:
-                for friend_id in splitted_group:
+            with tqdm(total=len(friends_to_download)) as pbar:
+            #for splitted_group in splitted_friends:
+                for friend_id in friends_to_download:
                         try:
-                            if args.debug > 0:
+                            pbar.update(1)
+                            if args.debug > 1:
                                 print('Downloading friend Nr {}: {}'.format(amount_users, friend_id))
                             try:
                                 friend = twitter_api.get_user(friend_id)
                             except tweepy.error.TweepError as e:
                                 if e == 'Not authorized':
-                                    print('The account of this user is protected, we can not get its friends.')
+                                    print('[+] The account of this user is protected, we can not get its friends.')
                                 elif e[0][0]['code'] == 88 or e[0][0]['code'] == 50:
-                                    print("Rate limit exceeded to get friends data, we will sleep are retry in 15 minutes. The friends so far are stored.")
-                                # Store friends so far
-                                pickle.dump(self.friends, open( self.dirpath + self.screen_name + '/' + self.screen_name + '.twitter_friends', "wb" ) )
+                                    print("[+] Rate limit exceeded to get friends data, we will sleep are retry in 15 minutes. The friends so far are stored.")
+                                # Store this user so far
+                                #pickle.dump(self.friends, open( self.dirpath + self.screen_name + '/' + self.screen_name + '.twitter_friends', "wb" ) )
+                                pickle.dump(user, open( dirpath + name + '/' + name + '.data', "wb" ) )
                                 # Sleep
                                 print('Waiting 15 minutes...')
                                 time.sleep(900)
@@ -450,9 +453,10 @@ class User():
                                 continue
                             except Exception as e:
                                 # catch all? What are we doing here?
-                                print('Weird catch. Error {}'.format(e))
-                                print('Save friends.')
-                                pickle.dump(self.friends, open( self.dirpath + self.screen_name + '/' + self.screen_name + '.twitter_friends', "wb" ) )
+                                print('Weird error {}'.format(e))
+                                print('Save user just in case.')
+                                #pickle.dump(self.friends, open( self.dirpath + self.screen_name + '/' + self.screen_name + '.twitter_friends', "wb" ) )
+                                pickle.dump(user, open( dirpath + name + '/' + name + '.data', "wb" ) )
                             UserFriend = User(friend.screen_name)
                             UserFriend.set_twitter_info(friend)
                             self.friends[friend.screen_name] = UserFriend
@@ -460,14 +464,17 @@ class User():
                             amount_users += 1
                         except KeyboardInterrupt:
                             # Print Summary of detections in the last Time Window
-                            print('Keyboard Interrupt. Storing the friends')
-                            pickle.dump(self.friends, open( self.dirpath + self.screen_name + '/' + self.screen_name + '.twitter_friends', "wb" ) )
+                            print('Keyboard Interrupt. Storing the user so far.')
+                            #pickle.dump(self.friends, open( self.dirpath + self.screen_name + '/' + self.screen_name + '.twitter_friends', "wb" ) )
+                            pickle.dump(user, open( dirpath + name + '/' + name + '.data', "wb" ) )
                             raise
                 # Between groups save friends
-                pickle.dump(self.friends, open( self.dirpath + self.screen_name + '/' + self.screen_name + '.twitter_friends', "wb" ) )
-                amount_groups += 1
+                #pickle.dump(self.friends, open( self.dirpath + self.screen_name + '/' + self.screen_name + '.twitter_friends', "wb" ) )
+                #pickle.dump(user, open( dirpath + name + '/' + name + '.data', "wb" ) )
+                #amount_groups += 1
             # Store the friends at the end
-            pickle.dump(self.friends, open( self.dirpath + self.screen_name + '/' + self.screen_name + '.twitter_friends', "wb" ) )
+            #pickle.dump(self.friends, open( self.dirpath + self.screen_name + '/' + self.screen_name + '.twitter_friends', "wb" ) )
+            pickle.dump(user, open( dirpath + name + '/' + name + '.data', "wb" ) )
         # Finally continue processing the friends
 
     def print_stats(self, dataset, top=5):
@@ -491,7 +498,7 @@ class User():
             print("No data")
         print("")
 
-    def print_charts(dataset, title, weekday=False):
+    def print_charts(self, dataset, title, weekday=False):
         """ Prints nice charts based on a dict {(key, value), ...} """
         chart = []
         keys = sorted(dataset.keys())
@@ -651,14 +658,12 @@ if __name__ == '__main__':
         parser.add_argument('-n', '--names', required=False, metavar="screen_names", help='target screen_name. Can be a comma separated list of names for multiple comparisons.')
         parser.add_argument('--no-timezone', action='store_true', help='removes the timezone auto-adjustment (default is UTC)')
         parser.add_argument('--utc-offset', type=int, help='manually apply a timezone offset (in seconds)')
-        parser.add_argument('-r', '--friends', action='store_true', help='Retrieve the friends of each user and perform an analysis on _their_ data. Use -N to select the amount of friends. Use -o if you want to analyze the offline cached friends. (rate limit = 300 friends max, any user, per 15 mins)')
         parser.add_argument('-s', '--nosummary', action='store_true', default=False, help='Do not show the summary of the user.)')
         parser.add_argument('-F', '--quickfollowers', action='store_true', help='Print only a very short summary about the number of followers.')
         parser.add_argument('-c', '--color', action='store_true', help='Use colors when printing')
         parser.add_argument('-N', '--numfriends', action='store', help='Max amount of friends to retrieve when -r is used. Defaults to 200. Use -1 to retrieve all of them. Warning! this can take long, since twitter limits 700 friends requests every 15mins approx. If you use -g for the graph, then this options selects the minimum amount of shared friends to put in the graph as nodes.', default=200, type=int)
         parser.add_argument('-g', '--graphusers', action='store_true', help='Get the list of users specified with -n, read their _offline_ list of users, and create a unique graph for all of them and their shared friends..')
         parser.add_argument('-o', '--offline', action='store_true', default=False, help='Use the offline data stored in cache for all the actions. Do not retrieve them from Twitter (use after you retrieved it at least once).')
-        parser.add_argument('-L', '--lastfriend', action='store', type=int, help='Last friend we retrieved before, to continue downloading friends after they.')
         parser.add_argument('-d', '--debug', action='store', type=int, default=0, help='Debug level.')
         parser.add_argument('-t', '--maxtweets', action='store', type=int, default=1000, help='Maximum amount of tweets to download for analysis per user.')
         parser.add_argument('-x', '--redocache', action='store_true', help='Delete, for this user, the current cache and download again.')
@@ -714,9 +719,6 @@ if __name__ == '__main__':
                     # Option by default, print a Summary of the account, including the friends
                     elif not args.nosummary:
                         user.print_summary(args.color)
-                    # Get the people followed by this user.
-                    elif args.friends:
-                        user.get_friends(twitter_api, name, args.numfriends, args.offline)
                     # Store this user in our disk cache
                     pickle.dump(user, open( dirpath + name + '/' + name + '.data', "wb" ) )
                 except KeyboardInterrupt:
@@ -738,6 +740,7 @@ if __name__ == '__main__':
         # Give me one user and monitor it in real time continually. Store new and old followers, etc.
         # Download the tweets like friends, continusly until we have them all, or a limit.
         # The language of tweets make it only for not retweeted tweets
+        # For computing user mentions, use ids and not screen names
 
     except tweepy.error.TweepError as e:
         print("[\033[91m!\033[0m] Twitter error: {}".format(e))
