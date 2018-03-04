@@ -98,10 +98,11 @@ class User():
         try:
             self.user_info = twitter_api.get_user(self.screen_name)
             self.protected = self.user_info.protected
+            return True
         except tweepy.error.TweepError as e:
-            print e
             if e[0][0]['code'] == 50: # 50 is user not found
-                print('User not found')
+                print('User not found!')
+                shutil.rmtree(dirpath + name, ignore_errors=True)
                 return False
             elif e[0][0]['code'] == 63: # your account is suspended
                 print('User has been suspended')
@@ -109,6 +110,9 @@ class User():
             elif e[0][0]['code'] == 88: 
                 print('This user is protected and we can not get its data.')
                 self.protected = True
+                return True
+            else:
+                print e
 
     def get_tweets(self):
         """ Download Tweets from username account """
@@ -132,17 +136,22 @@ class User():
                 print('User suspended the download of tweets. Continuing with the analysis.')
                 return True
             except tweepy.error.TweepError as e:
-                print e
-                if e[0][0]['code'] == 50: # 50 is user not found
-                    print('User not found')
-                    return False
-                elif e[0][0]['code'] == 63: # your account is suspended
-                    print('User has been suspended')
-                    return False
-                elif e[0][0]['code'] == 88: 
-                    print('This user is protected and we can not get its data.')
-                    self.protected = True
-                    return False
+                try:
+                    if e[0][0]['code'] == 63: # your account is suspended
+                        print('User has been suspended')
+                        return False
+                    elif e[0][0]['code'] == 88: 
+                        print('This user is protected and we can not get its data.')
+                        self.protected = True
+                        return False
+                    elif e[0][0]['code'] == 401: 
+                        print('Not authorized.')
+                        return False
+                except TypeError:
+                    print e
+                    if 'Twitter error response: status code = 401' in e:
+                        print('Not Authorized for some reason')
+                        return False
 
     def print_summary(self, color):
         """
@@ -226,7 +235,7 @@ class User():
                 self.tweets_detected_sources[tweet.source] = 1
             # Detecting geolocation
             if tweet.place:
-                self.geo_enabled_tweet += 1
+                self.geo_enabled_tweets += 1
                 try:
                     self.tweets_detected_places[tweet.place.name] += 1
                 except KeyError:
@@ -263,17 +272,16 @@ class User():
         self.print_stats(self.tweets_detected_langs)
         print("[+] Sources from {} Tweets (top)".format(len(self.tweets)))
         self.print_stats(self.tweets_detected_sources)
-        print("[+] Places from {} Tweets (top)".format(len(self.tweets)))
-        self.print_stats(self.tweets_detected_places)
         print("[+] There are {} geo enabled tweet(s)".format(self.geo_enabled_tweets))
         print('')
+        print("[+] Places from {} Tweets (top)".format(len(self.tweets)))
+        self.print_stats(self.tweets_detected_places)
         print("[+] HashTags from {} Tweets (top)".format(len(self.tweets)))
         self.print_stats(self.tweets_detected_hashtags, top=10)
         print("[+] Domains from {} Tweets (top)".format(len(self.tweets)))
         self.print_stats(self.tweets_detected_domains)
         print("[+] Timezones from {} Tweets (top)".format(len(self.tweets)))
         self.print_stats(self.tweets_detected_timezones)
-        #print(self.tweets[id].geo_enabled_tweet)
         print("[+] Mentioned Users from {} Tweets (top)".format(len(self.tweets)))
         self.print_stats(self.tweets_mentioned_users)
         print("[+] Most retweeted users from {} Tweets (top)".format(len(self.tweets)))
@@ -427,19 +435,27 @@ class User():
                             try:
                                 friend = twitter_api.get_user(friend_id)
                             except tweepy.error.TweepError as e:
-                                if e == 'Not authorized':
-                                    print('[+] The account of this user is protected, we can not get its friends.')
-                                elif e[0][0]['code'] == 88 or e[0][0]['code'] == 50:
-                                    print("[+] Rate limit exceeded to get friends data, we will sleep are retry in 15 minutes. The friends so far are stored.")
-                                # Store this user so far
-                                pickle.dump(user, open( dirpath + name + '/' + name + '.data', "wb" ) )
-                                # Sleep
-                                print('Waiting 15 minutes...')
-                                time.sleep(900)
-                                print('Resuming download...')
-                                # Retrieve the same last user that we couldn't before
-                                friend = twitter_api.get_user(friend_id)
-                                continue
+                                try:
+                                    if e == 'Not authorized':
+                                        print('[+] The account of this user is protected, we can not get its friends.')
+                                    elif e[0][0]['code'] == 88 or e[0][0]['code'] == 50:
+                                        print("[+] Rate limit exceeded to get friends data, we will sleep are retry in 15 minutes. The friends so far are stored.")
+                                    # Store this user so far
+                                    pickle.dump(user, open( dirpath + name + '/' + name + '.data', "wb" ) )
+                                    # Sleep
+                                    print('Waiting 15 minutes...')
+                                    time.sleep(900)
+                                    print('Resuming download...')
+                                    # Retrieve the same last user that we couldn't before
+                                    friend = twitter_api.get_user(friend_id)
+                                    continue
+                                except TypeError:
+                                    # For some reason the error from twitter not always can be indexed...
+                                    print e
+                                    # catch all? What are we doing here?
+                                    print('Weird error {}'.format(e))
+                                    print('Save user just in case.')
+                                    pickle.dump(user, open( dirpath + name + '/' + name + '.data', "wb" ) )
                             except Exception as e:
                                 # catch all? What are we doing here?
                                 print('Weird error {}'.format(e))
@@ -668,6 +684,7 @@ if __name__ == '__main__':
         # Go user by user given
         if args.names:
             for name in args.names.split(','):
+                print('\nProcessing the name {}.'.format(name))
                 try:
                     # Should we delete the cache for this user?
                     if args.redocache:
@@ -675,7 +692,8 @@ if __name__ == '__main__':
                     # Create our folder if we need it, and the user object
                     try:
                         os.makedirs(dirpath + name)
-                        print('Folders created in {}'.format(dirpath + name))
+                        if args.debug > 1:
+                            print('Folders created in {}'.format(dirpath + name))
                         # The folder Is not there
                         user = User(name)
                     except OSError:
@@ -694,7 +712,8 @@ if __name__ == '__main__':
                     if not args.offline:
                         if args.debug > 1:
                             print('Getting basic twitter info.')
-                        user.get_twitter_info()
+                        if not user.get_twitter_info():
+                            continue
                     # Only show the amount of friends
                     if args.quickfollowers:
                         user.print_followers()
