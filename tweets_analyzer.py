@@ -344,7 +344,7 @@ class User():
         """ 
         Print only the info about followers
         """
-        print('{},{},{}'.format(self.creation_time,self.screen_name,self.user_info.followers_count))
+        print('{},{},{}'.format(datetime.datetime.now(),self.screen_name,self.user_info.followers_count))
 
     def print_friends_analysis(self):
         """
