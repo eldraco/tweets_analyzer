@@ -1,22 +1,19 @@
 # Twitter Profiler 
 
-Twitter Profiler is a tool to download data about users in Twitter and analyze it in a simple manner. The tool implements some basic statistics about the usage patterns of the user and attempts to profile the user.  
+Twitter Profiler is a tool to download data about users in Twitter and analyze it in a simple manner. The tool implements some basic statistics about the usage patterns of the user and attempts to profile the user. The goal of the tool is to analyze the features and properties of users in Twitter and help identify different types of users. Twitter Profiler implements a comparison of users by plotting the shared friends of multiple users. It can take a large amount of users, analyze who they follow (friends) and graph only those friends that are followed by a defined amount of users. 
+
+It answers the question: Which users are followed simultaneously by the accounts xx,yy,zz,aa,bb? 
 
 ## Features
 
 - You can ask for one user or multiple users simultaneously. The program will handle the API and timings in order to download everything.
+- Average tweet activity, by hour and by day of the week
+- Timezone and language set for the Twitter interface
+- Sources used (mobile application, web browser, ...)
+- Geolocations
+- Most used hashtags, most retweeted users and most mentioned users
+- Friends analysis based on most frequent timezones/languages
 
-
-
-The goal of this simple python script is to analyze a Twitter profile through its tweets by detecting:
-  - Average tweet activity, by hour and by day of the week
-  - Timezone and language set for the Twitter interface
-  - Sources used (mobile application, web browser, ...)
-  - Geolocations
-  - Most used hashtags, most retweeted users and most mentioned users
-  - Friends analysis based on most frequent timezones/languages
-
-There are plenty of things that could be added to the script, feel free to contribute! 👍
 
 ### Installation
 
@@ -34,28 +31,60 @@ pip install -r requirements.txt
 ### Usage
 
 ```
-usage: tweets_analyzer.py -n <screen_name> [options]
+usage: twitter_profiler.py -n <screen_name> [options]
 
-Simple Twitter Profile Analyzer
+Twitter Profiler version 0.4. Author: Sebastian Garcia (eldraco@gmail.com,
+@eldracote). Based on original code of @x0rz.
 
 optional arguments:
   -h, --help            show this help message and exit
-  -l N, --limit N       limit the number of tweets to retreive (default=1000)
-  -n screen_name, --name screen_name
-                        target screen_name
-  -f FILTER, --filter FILTER
-                        filter by source (ex. -f android will get android
-                        tweets only)
-  --no-timezone         removes the timezone auto-adjustment (default is UTC)
+  -n screen_names, --names screen_names
+                        Target screen_names. Can be a comma separated list of
+                        names for multiple comparisons and multiple download
+                        of data.
+  -l LIMIT, --limit LIMIT
+                        Limit the number of tweets to retreive (default=1000)
+  --no-timezone         Removes the timezone auto-adjustment (default is UTC)
   --utc-offset UTC_OFFSET
-                        manually apply a timezone offset (in seconds)
-  --friends             will perform quick friends analysis based on lang and
-                        timezone (rate limit = 15 requests)
+                        Manually apply a timezone offset (in seconds)
+  -s, --nosummary       Do not show the summary of the user.
+  -F, --quickfollowers  Print only a very short summary about the number of
+                        followers for the users. Useful to run with cron and
+                        store the results.
+  -c, --color           Use colors when printing
+  -N NUMFRIENDS, --numfriends NUMFRIENDS
+                        Max amount of friends to retrieve. Defaults to 200.
+                        Use -1 to retrieve all of them. Warning! this can take
+                        long, since twitter limits 700 friends requests every
+                        15mins approx.
+  -o, --offline         Use the offline data stored in cache for all the
+                        actions. Do not retrieve them from Twitter (use after
+                        you retrieved it at least once).
+  -d DEBUG, --debug DEBUG
+                        Debug level.
+  -t MAXTWEETS, --maxtweets MAXTWEETS
+                        Maximum amount of tweets to download for analysis per
+                        user.
+  -x, --redocache       Delete all the cache data for this user and download
+                        again. Useful if the cache becomes corrupted.
+  -i, --listcacheusers  List the users in the cache.
+  -g, --graphusers      Get the list of users specified with -n, read their
+                        _offline_ data, and create a unique graph for all
+                        their shared friends. Two files are generated:
+                        graph.png and graph.dot. The PNG is an image with
+                        basic properties. The dot file is for you to play and
+                        improve the graph (e.g. cat graph.dot |sfdp -Tpng -o
+                        graph2.png). Use -m to limit the minimum amount of
+                        shared connections you want in the graph.
+  -m MINNUMNSHAREDNODES, --minnumnsharednodes MINNUMNSHAREDNODES
+                        Together with -g for making a graph, this options
+                        selects the minimum amount of shared friends to put in
+                        the graph as nodes. Defaults to 2
 ```
 
 ### Example output
 
-![Twitter account activity](https://cdn-images-1.medium.com/max/800/1*KuhfDr_2bOJ7CPOzVXnwLA.png)
+![Twitter account activity]()
 
 License
 ----
