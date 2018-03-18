@@ -1,7 +1,19 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 # encoding=utf8
-# Copyright (c) 2017 @x0rz
+# Copyright (c) 2018 Sebastian Garcia, eldracote
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, version 3 of the License.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# This program started as a fork of the excelent program tweets_analyzer of @x0rz. Thanks to him and all contributors for making such a wondeful tool.
+# Original code Copyright (c) 2017 @x0rz
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -12,11 +24,11 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
 #
-# Usage:
-# python tweets_analyzer.py -n screen_name
-#
 # Install:
-# pip install tweepy ascii_graph tqdm numpy
+# pip install -r requirements.txt
+# 
+# Basic Usage:
+# python twitter_profiler.py -n screen_name
 
 from __future__ import unicode_literals
 from ascii_graph import Pyasciigraph
@@ -40,7 +52,7 @@ import pickle
 import shutil
 
 
-__version__ = '0.3'
+__version__ = '0.4'
 
 def set_output_encoding(encoding='utf-8'):
     """ 
@@ -660,21 +672,21 @@ if __name__ == '__main__':
     try:
 	set_output_encoding()
         # Process Parameters
-        parser = argparse.ArgumentParser(description="Simple Twitter Profile Analyzer (https://github.com/x0rz/tweets_analyzer) version %s" % __version__, usage='%(prog)s -n <screen_name> [options]')
-        parser.add_argument('-l', '--limit', metavar='N', type=int, default=1000, help='Limit the number of tweets to retreive (default=1000)')
-        parser.add_argument('-n', '--names', required=False, metavar="screen_names", help='Target screen_name. Can be a comma separated list of names for multiple comparisons.')
+        parser = argparse.ArgumentParser(description="Twitter Profiler version %s. Author: Sebastian Garcia (eldraco@gmail.com, @eldracote). Based on original code of @x0rz." % __version__, usage='%(prog)s -n <screen_name> [options]')
+        parser.add_argument('-n', '--names', required=False, metavar="screen_names", help='Target screen_names. Can be a comma separated list of names for multiple comparisons and multiple download of data.')
+        parser.add_argument('-l', '--limit', type=int, default=1000, help='Limit the number of tweets to retreive (default=1000)')
         parser.add_argument('--no-timezone', action='store_true', help='Removes the timezone auto-adjustment (default is UTC)')
         parser.add_argument('--utc-offset', type=int, help='Manually apply a timezone offset (in seconds)')
         parser.add_argument('-s', '--nosummary', action='store_true', default=False, help='Do not show the summary of the user.')
-        parser.add_argument('-F', '--quickfollowers', action='store_true', help='Print only a very short summary about the number of followers.')
+        parser.add_argument('-F', '--quickfollowers', action='store_true', help='Print only a very short summary about the number of followers for the users. Useful to run with cron and store the results.')
         parser.add_argument('-c', '--color', action='store_true', help='Use colors when printing')
         parser.add_argument('-N', '--numfriends', action='store', help='Max amount of friends to retrieve. Defaults to 200. Use -1 to retrieve all of them. Warning! this can take long, since twitter limits 700 friends requests every 15mins approx.', default=200, type=int)
         parser.add_argument('-o', '--offline', action='store_true', default=False, help='Use the offline data stored in cache for all the actions. Do not retrieve them from Twitter (use after you retrieved it at least once).')
         parser.add_argument('-d', '--debug', action='store', type=int, default=0, help='Debug level.')
         parser.add_argument('-t', '--maxtweets', action='store', type=int, default=1000, help='Maximum amount of tweets to download for analysis per user.')
-        parser.add_argument('-x', '--redocache', action='store_true', help='Delete, for this user, the current cache and download again.')
+        parser.add_argument('-x', '--redocache', action='store_true', help='Delete all the cache data for this user and download again. Useful if the cache becomes corrupted.')
         parser.add_argument('-i', '--listcacheusers', action='store_true', help='List the users in the cache.')
-        parser.add_argument('-g', '--graphusers', action='store_true', help='Get the list of users specified with -n, read their _offline_ list of users, and create a unique graph for all of them and their shared friends. Two files are generated: graph.png and graph.dot. The PNG is an image with basic properties. The dot file is for you to play and improve the graph (e.g. cat graph.dot |sfdp -Tpng -o graph2.png)')
+        parser.add_argument('-g', '--graphusers', action='store_true', help='Get the list of users specified with -n, read their _offline_ data, and create a unique graph for all their shared friends. Two files are generated: graph.png and graph.dot. The PNG is an image with basic properties. The dot file is for you to play and improve the graph (e.g. cat graph.dot |sfdp -Tpng -o graph2.png). Use -m to limit the minimum amount of shared connections you want in the graph.')
         parser.add_argument('-m', '--minnumnsharednodes', action='store', help='Together with -g for making a graph, this options selects the minimum amount of shared friends to put in the graph as nodes. Defaults to 2', default=2, type=int)
         args = parser.parse_args()
 
