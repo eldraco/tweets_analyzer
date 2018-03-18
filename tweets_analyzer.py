@@ -90,13 +90,20 @@ class User():
         self.activity_weekly = { "%i" % i: 0 for i in range(7) }
 
     def set_twitter_info(self, data):
-        """ To call if you first obtained the data from twitter, you created a user and now you want to store it """
+        """ Sets the data of this user by hand.
+        Useful if you first obtained the data from twitter before by other means and now you want to store it in its user object
+        """
         self.user_info = data
 
     def get_twitter_info(self):
-        """ To call if you created this user only with a name, and want more data """
+        """ Uses the twitter API to get info about the user. 
+        Uses the name already stored in this object.
+        This function is separated because the object can be used without asking Twitter.
+        Since we store the complete Twitter object inside our object, we don't need to extract each value independently. We just use them.
+        """
         try:
             self.user_info = twitter_api.get_user(self.screen_name)
+            # If the user is protected, mark it now. We do this here so from now on the object can deal with this situation correctly
             self.protected = self.user_info.protected
             return True
         except tweepy.error.TweepError as e:
@@ -130,7 +137,8 @@ class User():
                         self.tweets[status.id] = status
                 else:
                     # The number of previous tweets and current tweets is the same, do not download them
-                    print('The number of tweets stored in the cache is the same as the current number of tweets. Not dowloading.')
+                    if args.debug > 1:
+                        print('The number of tweets stored in the cache is the same as the current number of tweets. Not dowloading.')
                 return True
             except KeyboardInterrupt:
                 print('User suspended the download of tweets. Continuing with the analysis.')
@@ -268,25 +276,17 @@ class User():
 
     def print_tweets_info(self):
         """ Output the tweets"""
-        print("[+] Languages from {} Tweets (top)".format(len(self.tweets)))
-        self.print_stats(self.tweets_detected_langs)
-        print("[+] Sources from {} Tweets (top)".format(len(self.tweets)))
-        self.print_stats(self.tweets_detected_sources)
-        print("[+] There are {} geo enabled tweet(s)".format(self.geo_enabled_tweets))
-        print('')
-        print("[+] Places from {} Tweets (top)".format(len(self.tweets)))
-        self.print_stats(self.tweets_detected_places)
-        print("[+] HashTags from {} Tweets (top)".format(len(self.tweets)))
-        self.print_stats(self.tweets_detected_hashtags, top=10)
-        print("[+] Domains from {} Tweets (top)".format(len(self.tweets)))
-        self.print_stats(self.tweets_detected_domains)
-        print("[+] Timezones from {} Tweets (top)".format(len(self.tweets)))
-        self.print_stats(self.tweets_detected_timezones)
-        print("[+] Mentioned Users from {} Tweets (top)".format(len(self.tweets)))
-        self.print_stats(self.tweets_mentioned_users)
-        print("[+] Most retweeted users from {} Tweets (top)".format(len(self.tweets)))
-        self.print_stats(self.retweeted_users)
-        # Print activity distrubution charts
+        self.print_stats(self.tweets_detected_langs, "[+] Top Languages from Tweets.")
+        self.print_stats(self.tweets_detected_sources, "[+] Top Sources from Tweets.")
+        if self.geo_enabled_tweets:
+            print("[+] There are {} geo enabled tweet(s)".format(self.geo_enabled_tweets))
+            print('')
+        self.print_stats(self.tweets_detected_places, "[+] Top Places from Tweets.")
+        self.print_stats(self.tweets_detected_hashtags, "[+] Top HashTags from Tweets.", top=10)
+        self.print_stats(self.tweets_detected_domains, "[+] Top Domains from Tweets.")
+        self.print_stats(self.tweets_detected_timezones, "[+] Top Timezones from Tweets.")
+        self.print_stats(self.tweets_mentioned_users, "[+] Top Mentioned Users from Tweets.")
+        self.print_stats(self.retweeted_users, "[+] Top Most retweeted users from Tweets.")
         self.print_charts(self.activity_hourly, "Daily activity distribution (per hour)")
         self.print_charts(self.activity_weekly, "Weekly activity distribution (per day)", weekday=True)
 
@@ -307,15 +307,10 @@ class User():
         else:
             def bold(text):
                 return text
-        if self.protected:
-            print('[+] User           : {}'.format(bold('@'+self.screen_name)))
-            print('[+] Twitter ID     : {}'.format(bold(self.user_info.id)))
-            print('[+] Date:          : {}'.format(bold(str(self.creation_time))))
-            print('[+] Protected      : {}'.format(bold(str(self.protected))))
-            return True
         print('[+] User           : {}'.format(bold('@'+self.screen_name)))
+        print('[+] Created on     : {}'.format(bold(self.user_info.created_at)))
         print('[+] Twitter ID     : {}'.format(bold(self.user_info.id)))
-        print('[+] Date:          : {}'.format(bold(str(self.creation_time))))
+        print('[+] Current Date:  : {}'.format(bold(str(self.creation_time))))
         print('[+] lang           : {}'.format(bold(self.user_info.lang)))
         print('[+] geo_enabled    : {}'.format(bold(str(self.user_info.geo_enabled))))
         print('[+] time_zone      : {}'.format(bold(str(self.user_info.time_zone))))
@@ -355,10 +350,8 @@ class User():
             max_friends = numpy.amin([self.user_info.friends_count, args.numfriends])
             print('[+] Analyzing friends.')
             self.process_friends()
-            print("[+] Friends languages (top 10)")
-            self.print_stats(self.friends_lang, top=10)
-            print("[+] Friends timezones (top 10)")
-            self.print_stats(self.friends_timezone, top=10)
+            self.print_stats(self.friends_lang, "[+] Top Friends languages.", top=10)
+            self.print_stats(self.friends_timezone, "[+] Top Friends timezones.", top=10)
 
     def process_friends(self):
         """ Process all the friends """
@@ -475,11 +468,12 @@ class User():
             pickle.dump(user, open( dirpath + name + '/' + name + '.data', "wb" ) )
         # Finally continue processing the friends
 
-    def print_stats(self, dataset, top=5):
+    def print_stats(self, dataset, text, top=5):
         """ Displays top values of something by order """
         sum = numpy.sum(list(dataset.values()))
         i = 0
         if sum:
+            print(text + ' (Total {} objects in this category).'.format(len(list(dataset.values()))))
             sorted_keys = sorted(dataset, key=dataset.get, reverse=True)
             max_len_key = max([len(x) for x in sorted_keys][:top])  # use to adjust column width
             for k in sorted_keys:
@@ -492,39 +486,38 @@ class User():
                 i += 1
                 if i >= top:
                     break
-        else:
-            print("No data")
-        print("")
+            print("")
 
     def print_charts(self, dataset, title, weekday=False):
         """ Prints nice charts based on a dict {(key, value), ...} """
-        chart = []
-        keys = sorted(dataset.keys())
-        mean = numpy.mean(list(dataset.values()))
-        median = numpy.median(list(dataset.values()))
-        def int_to_weekday(day):
-            weekdays = "Monday Tuesday Wednesday Thursday Friday Saturday Sunday".split()
-            return weekdays[int(day) % len(weekdays)]
-        for key in keys:
-            if (dataset[key] >= median * 1.33):
-                displayed_key = "%s (\033[92m+\033[0m)" % (int_to_weekday(key) if weekday else key)
-            elif (dataset[key] <= median * 0.66):
-                displayed_key = "%s (\033[91m-\033[0m)" % (int_to_weekday(key) if weekday else key)
-            else:
-                displayed_key = (int_to_weekday(key) if weekday else key)
-            chart.append((displayed_key, dataset[key]))
-        thresholds = {
-            int(mean): Gre, int(mean * 2): Yel, int(mean * 3): Red,
-        }
-        data = hcolor(chart, thresholds)
-        graph = Pyasciigraph(
-            separator_length=4,
-            multivalue=False,
-            human_readable='si',
-        )
-        for line in graph.graph(title, data):
-            print('{}'.format(line))
-        print("")
+        if dataset.values().count(0) != len(dataset.values()):
+            chart = []
+            keys = sorted(dataset.keys())
+            mean = numpy.mean(list(dataset.values()))
+            median = numpy.median(list(dataset.values()))
+            def int_to_weekday(day):
+                weekdays = "Monday Tuesday Wednesday Thursday Friday Saturday Sunday".split()
+                return weekdays[int(day) % len(weekdays)]
+            for key in keys:
+                if (dataset[key] >= median * 1.33):
+                    displayed_key = "%s (\033[92m+\033[0m)" % (int_to_weekday(key) if weekday else key)
+                elif (dataset[key] <= median * 0.66):
+                    displayed_key = "%s (\033[91m-\033[0m)" % (int_to_weekday(key) if weekday else key)
+                else:
+                    displayed_key = (int_to_weekday(key) if weekday else key)
+                chart.append((displayed_key, dataset[key]))
+            thresholds = {
+                int(mean): Gre, int(mean * 2): Yel, int(mean * 3): Red,
+            }
+            data = hcolor(chart, thresholds)
+            graph = Pyasciigraph(
+                separator_length=4,
+                multivalue=False,
+                human_readable='si',
+            )
+            for line in graph.graph(title, data):
+                print('{}'.format(line))
+            print("")
 
 def plot_users(users, dirpath):
     """ Read the friends of these users from a file and plot a graph"""
@@ -652,11 +645,11 @@ if __name__ == '__main__':
 	set_output_encoding()
         # Process Parameters
         parser = argparse.ArgumentParser(description="Simple Twitter Profile Analyzer (https://github.com/x0rz/tweets_analyzer) version %s" % __version__, usage='%(prog)s -n <screen_name> [options]')
-        parser.add_argument('-l', '--limit', metavar='N', type=int, default=1000, help='limit the number of tweets to retreive (default=1000)')
-        parser.add_argument('-n', '--names', required=False, metavar="screen_names", help='target screen_name. Can be a comma separated list of names for multiple comparisons.')
-        parser.add_argument('--no-timezone', action='store_true', help='removes the timezone auto-adjustment (default is UTC)')
-        parser.add_argument('--utc-offset', type=int, help='manually apply a timezone offset (in seconds)')
-        parser.add_argument('-s', '--nosummary', action='store_true', default=False, help='Do not show the summary of the user.)')
+        parser.add_argument('-l', '--limit', metavar='N', type=int, default=1000, help='Limit the number of tweets to retreive (default=1000)')
+        parser.add_argument('-n', '--names', required=False, metavar="screen_names", help='Target screen_name. Can be a comma separated list of names for multiple comparisons.')
+        parser.add_argument('--no-timezone', action='store_true', help='Removes the timezone auto-adjustment (default is UTC)')
+        parser.add_argument('--utc-offset', type=int, help='Manually apply a timezone offset (in seconds)')
+        parser.add_argument('-s', '--nosummary', action='store_true', default=False, help='Do not show the summary of the user.')
         parser.add_argument('-F', '--quickfollowers', action='store_true', help='Print only a very short summary about the number of followers.')
         parser.add_argument('-c', '--color', action='store_true', help='Use colors when printing')
         parser.add_argument('-N', '--numfriends', action='store', help='Max amount of friends to retrieve when -r is used. Defaults to 200. Use -1 to retrieve all of them. Warning! this can take long, since twitter limits 700 friends requests every 15mins approx. If you use -g for the graph, then this options selects the minimum amount of shared friends to put in the graph as nodes.', default=200, type=int)
@@ -735,10 +728,10 @@ if __name__ == '__main__':
                     print('+ {:17}'.format(user)),
                 print('')
         # TODO
-        # Add when the user was created in twitter.
+        # When ctrl-c the download of users, still print info
+        # Download the tweets like friends, continusly until we have them all, or a limit.
         # Add if they have an image or not to the summary
         # Give me one user and monitor it in real time continually. Store new and old followers, etc.
-        # Download the tweets like friends, continusly until we have them all, or a limit.
         # The language of tweets make it only for not retweeted tweets
         # For computing user mentions, use ids and not screen names
         # compare two users
