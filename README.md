@@ -1,4 +1,12 @@
-# Simple Twitter Profile Analyzer
+# Twitter Profiler 
+
+Twitter Profiler is a tool to download data about users in Twitter and analyze it in a simple manner. The tool implements some basic statistics about the usage patterns of the user and attempts to profile the user.  
+
+## Features
+
+- You can ask for one user or multiple users simultaneously. The program will handle the API and timings in order to download everything.
+
+
 
 The goal of this simple python script is to analyze a Twitter profile through its tweets by detecting:
   - Average tweet activity, by hour and by day of the week
