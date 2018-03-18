@@ -22,6 +22,7 @@ from __future__ import unicode_literals
 from ascii_graph import Pyasciigraph
 from ascii_graph.colors import Gre, Yel, Red
 from ascii_graph.colordata import hcolor
+from collections import OrderedDict
 from tqdm import tqdm
 import tweepy
 import numpy
@@ -66,7 +67,8 @@ class User():
     def __init__(self, screen_name):
         self.screen_name = screen_name
         self.creation_time = datetime.datetime.now()
-        self.tweets = {}
+        #self.tweets = {}
+        self.tweets = OrderedDict()
         self.tweets_detected_langs = collections.Counter()
         self.tweets_detected_sources = collections.Counter()
         self.tweets_detected_places = collections.Counter()
@@ -124,21 +126,31 @@ class User():
     def get_tweets(self):
         """ Download Tweets from username account """
         num_tweets = numpy.amin([args.maxtweets, self.user_info.statuses_count])
+        if args.debug > 2: 
+            print('\tId of the Last tweet retrieved{}'.format(self.tweets.keys()[-1]))
         if args.offline:
-            # Get the tweets from the cache
+            # Don't download, so we will use the tweets already in the cache
             return True
         else:
             # Download tweets
             try:
                 if len(self.tweets) != self.user_info.statuses_count:
                     print('[+] Downloading {} tweets...'.format(num_tweets))
-                    for status in tqdm(tweepy.Cursor(twitter_api.user_timeline, screen_name=self.screen_name).items(num_tweets), unit="tw", total=num_tweets):
-                        # Create a new twit
-                        self.tweets[status.id] = status
+                    try:
+                        # We do have a last tweet downloaded, continue from there...
+                        last_tweet_obtained = self.tweets.keys()[-1]
+                        for status in tqdm(tweepy.Cursor(twitter_api.user_timeline, screen_name=self.screen_name, max_id=last_tweet_obtained).items(num_tweets), unit="tw", total=num_tweets):
+                            # Create a new twit
+                            self.tweets[status.id] = status
+                    except IndexError:
+                        # No previous tweets downloaded, start fresh.
+                        for status in tqdm(tweepy.Cursor(twitter_api.user_timeline, screen_name=self.screen_name).items(num_tweets), unit="tw", total=num_tweets):
+                            # Create a new twit
+                            self.tweets[status.id] = status
                 else:
                     # The number of previous tweets and current tweets is the same, do not download them
                     if args.debug > 1:
-                        print('The number of tweets stored in the cache is the same as the current number of tweets. Not dowloading.')
+                        print('The number of tweets stored in the cache is the same as the current number of tweets. Not downloading.')
                 return True
             except KeyboardInterrupt:
                 print('User suspended the download of tweets. Continuing with the analysis.')
@@ -328,6 +340,7 @@ class User():
         print('[+] URL            : {}'.format(bold(str(self.user_info.url))))
         print('[+] Verified?      : {}'.format(bold(str(self.user_info.verified))))
         print('[+] Tweets liked   : {}'.format(bold(str(self.user_info.favourites_count))))
+        print('[+] Default profile image: {}'.format(bold(str(self.user_info.default_profile_image))))
         try:
             censored = self.user_info.withheld_in_countries
         except Exception as e:
@@ -347,8 +360,7 @@ class User():
         """
         # If the account is protected, we can not ask for its friends
         if not self.protected:
-            max_friends = numpy.amin([self.user_info.friends_count, args.numfriends])
-            print('[+] Analyzing friends.')
+            print('[+] Analyzing {} friends.'.format(len(self.friends)))
             self.process_friends()
             self.print_stats(self.friends_lang, "[+] Top Friends languages.", top=10)
             self.print_stats(self.friends_timezone, "[+] Top Friends timezones.", top=10)
@@ -415,7 +427,7 @@ class User():
             else:
                 friends_to_continue_download = self.friends_ids
             friends_to_download = friends_to_continue_download[:args.numfriends]
-            print('Friends to download: {}'.format(len(friends_to_download)))
+            print('Friends to download: Next {} (user has {} friends)'.format(len(friends_to_download), self.user_info.friends_count))
             # We split the friends in groups in case we need to sleep because we are asking to much. Now not so used because we wait for the twitter exception
             amount_users = 0
             # This prints the bar
@@ -515,7 +527,7 @@ class User():
                 multivalue=False,
                 human_readable='si',
             )
-            for line in graph.graph(title, data):
+            for line in graph.graph(title + ' ({} tweets)'.format(len(self.tweets)), data):
                 print('{}'.format(line))
             print("")
 
@@ -537,15 +549,17 @@ def plot_users(users, dirpath):
     for user in users.split(','):
         # read their friends
         try:
-            friends = pickle.load( open( dirpath + '/' + user + '/' + user + '.twitter_friends', "rb" ) )
+            datapath = os.path.expanduser(dirpath + user + '/' + user + '.data')
+            user_object = pickle.load(open(datapath, 'rb'))
+            friends = user_object.friends.keys()
         except IOError:
             # This user is not in the cache
             continue
-        for friend in list(set(friends.values())):
+        for friend in list(set(friends)):
             try:
-                counter_papa[friend.screen_name] += 1
+                counter_papa[friend] += 1
             except KeyError:
-                counter_papa[friend.screen_name] = 1
+                counter_papa[friend] = 1
             counter_for_user += 1
         print('User {} had {} nodes.'.format(user, counter_for_user))
         counter_for_user = 0
@@ -577,7 +591,7 @@ def plot_users(users, dirpath):
             color_node[node] = 'white'
     # Delete the secondary nodes that had less than certain amount of edges to them
     try:
-        minnodes = args.numfriends
+        minnodes = args.minnumnsharednodes
     except AttributeError:
         minnodes = 0
     count_reviewed = 0
@@ -586,7 +600,9 @@ def plot_users(users, dirpath):
             print('User: {}'.format(user))
         # read their friends
         try:
-            friends = pickle.load( open( dirpath + '/' + user + '/' + user + '.twitter_friends', "rb" ) )
+            datapath = os.path.expanduser(dirpath + user + '/' + user + '.data')
+            user_object = pickle.load(open(datapath, 'rb'))
+            friends = user_object.friends.keys()
         except IOError:
             # This user is not in the cache
             continue
@@ -604,13 +620,13 @@ def plot_users(users, dirpath):
             count_reviewed += 1
             if args.debug > 1:
                 print('Add node: {} is {}'.format(node.get_name(), count_reviewed))
-        for friend in list(set(friends.values())):
+        for friend in list(set(friends)):
             if args.debug > 1:
-                print('\tEvaluating Friend: {}, has {} links'.format(friend.screen_name, counter_papa[friend.screen_name]))
-            if counter_papa[friend.screen_name] > minnodes:
+                print('\tEvaluating Friend: {}, has {} links'.format(friend, counter_papa[friend]))
+            if counter_papa[friend] > minnodes:
                 # Add the secondary nodes
-                if pygraph.get_node(friend.screen_name) == []:
-                    node = pydot.Node(friend.screen_name,fontcolor='black')
+                if pygraph.get_node(friend) == []:
+                    node = pydot.Node(friend,fontcolor='black')
                     node.set_group('Second')
                     node.set_style('filled')
                     node.set_fillcolor(color_node[node.get_name().replace('"','')])
@@ -619,7 +635,7 @@ def plot_users(users, dirpath):
                     if args.debug > 1:
                         print('\t\tAdd node: {} is {}'.format(node.get_name(), count_reviewed))
                 # Make the edge
-                edge = pydot.Edge(user, friend.screen_name)
+                edge = pydot.Edge(user, friend)
                 pygraph.add_edge(edge)
     print('Total nodes processed: {}'.format(count_reviewed))
     nodes = pygraph.get_node_list()
@@ -652,13 +668,14 @@ if __name__ == '__main__':
         parser.add_argument('-s', '--nosummary', action='store_true', default=False, help='Do not show the summary of the user.')
         parser.add_argument('-F', '--quickfollowers', action='store_true', help='Print only a very short summary about the number of followers.')
         parser.add_argument('-c', '--color', action='store_true', help='Use colors when printing')
-        parser.add_argument('-N', '--numfriends', action='store', help='Max amount of friends to retrieve when -r is used. Defaults to 200. Use -1 to retrieve all of them. Warning! this can take long, since twitter limits 700 friends requests every 15mins approx. If you use -g for the graph, then this options selects the minimum amount of shared friends to put in the graph as nodes.', default=200, type=int)
-        parser.add_argument('-g', '--graphusers', action='store_true', help='Get the list of users specified with -n, read their _offline_ list of users, and create a unique graph for all of them and their shared friends..')
+        parser.add_argument('-N', '--numfriends', action='store', help='Max amount of friends to retrieve. Defaults to 200. Use -1 to retrieve all of them. Warning! this can take long, since twitter limits 700 friends requests every 15mins approx.', default=200, type=int)
         parser.add_argument('-o', '--offline', action='store_true', default=False, help='Use the offline data stored in cache for all the actions. Do not retrieve them from Twitter (use after you retrieved it at least once).')
         parser.add_argument('-d', '--debug', action='store', type=int, default=0, help='Debug level.')
         parser.add_argument('-t', '--maxtweets', action='store', type=int, default=1000, help='Maximum amount of tweets to download for analysis per user.')
         parser.add_argument('-x', '--redocache', action='store_true', help='Delete, for this user, the current cache and download again.')
         parser.add_argument('-i', '--listcacheusers', action='store_true', help='List the users in the cache.')
+        parser.add_argument('-g', '--graphusers', action='store_true', help='Get the list of users specified with -n, read their _offline_ list of users, and create a unique graph for all of them and their shared friends..')
+        parser.add_argument('-m', '--minnumnsharednodes', action='store', help='Together with -g for making a graph, this options selects the minimum amount of shared friends to put in the graph as nodes. Defaults to 2', default=2, type=int)
         args = parser.parse_args()
 
         # The path everyone uses to access the cache
@@ -728,9 +745,6 @@ if __name__ == '__main__':
                     print('+ {:17}'.format(user)),
                 print('')
         # TODO
-        # When ctrl-c the download of users, still print info
-        # Download the tweets like friends, continusly until we have them all, or a limit.
-        # Add if they have an image or not to the summary
         # Give me one user and monitor it in real time continually. Store new and old followers, etc.
         # The language of tweets make it only for not retweeted tweets
         # For computing user mentions, use ids and not screen names
