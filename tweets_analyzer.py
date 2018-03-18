@@ -674,7 +674,7 @@ if __name__ == '__main__':
         parser.add_argument('-t', '--maxtweets', action='store', type=int, default=1000, help='Maximum amount of tweets to download for analysis per user.')
         parser.add_argument('-x', '--redocache', action='store_true', help='Delete, for this user, the current cache and download again.')
         parser.add_argument('-i', '--listcacheusers', action='store_true', help='List the users in the cache.')
-        parser.add_argument('-g', '--graphusers', action='store_true', help='Get the list of users specified with -n, read their _offline_ list of users, and create a unique graph for all of them and their shared friends..')
+        parser.add_argument('-g', '--graphusers', action='store_true', help='Get the list of users specified with -n, read their _offline_ list of users, and create a unique graph for all of them and their shared friends. Two files are generated: graph.png and graph.dot. The PNG is an image with basic properties. The dot file is for you to play and improve the graph (e.g. cat graph.dot |sfdp -Tpng -o graph2.png)')
         parser.add_argument('-m', '--minnumnsharednodes', action='store', help='Together with -g for making a graph, this options selects the minimum amount of shared friends to put in the graph as nodes. Defaults to 2', default=2, type=int)
         args = parser.parse_args()
 
