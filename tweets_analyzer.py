@@ -129,9 +129,9 @@ class User():
             return True
         else:
             # Download tweets
-            print('[+] Downloading {} tweets...'.format(num_tweets))
             try:
                 if len(self.tweets) != self.user_info.statuses_count:
+                    print('[+] Downloading {} tweets...'.format(num_tweets))
                     for status in tqdm(tweepy.Cursor(twitter_api.user_timeline, screen_name=self.screen_name).items(num_tweets), unit="tw", total=num_tweets):
                         # Create a new twit
                         self.tweets[status.id] = status
@@ -463,7 +463,7 @@ class User():
                             # Print Summary of detections in the last Time Window
                             print('Keyboard Interrupt. Storing the user so far.')
                             pickle.dump(user, open( dirpath + name + '/' + name + '.data', "wb" ) )
-                            raise
+                            return True
             # Store the friends at the end
             pickle.dump(user, open( dirpath + name + '/' + name + '.data', "wb" ) )
         # Finally continue processing the friends
