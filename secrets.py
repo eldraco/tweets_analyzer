@@ -9,5 +9,6 @@ access_token="xxxxxxxx-xxxxxxxxxxxxxxxxxxxxxxxxxxx"
 access_token_secret="xxxxxxxxxxxxxxxxxxxxxxx"
 
 # API for repustate sentiment analysis. Get you API key for free from https://www.repustate.com
+from repustate import Client
 repustate_client = Client(api_key='xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx', version='v3')
 
