@@ -36,6 +36,7 @@ from ascii_graph.colors import Gre, Yel, Red
 from ascii_graph.colordata import hcolor
 from collections import OrderedDict
 from tqdm import tqdm
+from repustate import Client
 import tweepy
 import numpy
 import argparse
@@ -46,7 +47,7 @@ import sys
 import copy
 import os
 from urlparse import urlparse
-from secrets import consumer_key, consumer_secret, access_token, access_token_secret
+from secrets import consumer_key, consumer_secret, access_token, access_token_secret, repustate_client
 import pydot 
 import pickle
 import shutil
@@ -102,6 +103,42 @@ class User():
         self.protected = False
         self.activity_hourly = { ("%2i:00" % i).replace(" ", "0"): 0 for i in range(24) }
         self.activity_weekly = { "%i" % i: 0 for i in range(7) }
+
+    def analyze_sentiments(self):
+        """
+        For each twitt, analyze the sentiment
+        """
+        # 'add_filter', 'add_sentiment_rule', 'api_key', 'bulk_sentiment', 'categorize', 'chunk', 
+        # 'clean_html', 'commit_sentiment_rules', 'delete_filter', 'delete_sentiment_rule', 
+        # 'detect_language', 'entities', 'filter', 'function', 'host', 'list_filters', 
+        # 'list_sentiment_rules', 'port', 'pos_tags', 'protocol', 'sentiment', 'topic_sentiment', 
+        # 'url_template', 'usage', 'version']
+        if args.color:
+            def bold(text):
+                return '\033[1m' + text + '\033[0m'
+        else:
+            def bold(text):
+                return text
+        print('[+] Sentiment Analysis of Tweets')
+        counter = 50
+        for twitt in self.tweets:
+            if counter <= 0:
+                break
+            #print twitt
+            #print self.tweets[twitt]
+            text = self.tweets[twitt].text.replace('\n',' ')
+            try:
+                language = repustate_client.detect_language(text.encode('utf-8'))['language']
+                print('Sentiment: \033[1m{:16}\033[0m. Text: {}'.format(repustate_client.sentiment(text.encode('utf-8'), lang=language)['score'], text))
+            except UnicodeEncodeError:
+                print('\tEncode error with: {}'.format(text))
+	    except Exception as inst:
+		print 'Problem in analyze_sentiments () in class Processor'
+		print type(inst)     # the exception instance
+		print inst.args      # arguments stored in .args
+		print inst           # __str__ allows args to printed directly
+                print 'Text: {}'.format(text)
+            counter -= 1
 
     def set_twitter_info(self, data):
         """ Sets the data of this user by hand.
@@ -185,12 +222,12 @@ class User():
                         print('Not Authorized for some reason')
                         return False
 
-    def print_summary(self, color):
+    def print_summary(self):
         """
         Print a summary of the account
         """
         # Print basic info
-        self.print_basic_info(color)
+        self.print_basic_info()
         # Print info about the tweets
         self.print_tweets()
         # Print info about the friends
@@ -321,13 +358,18 @@ class User():
         for k in retweeted_users.keys():
             retweeted_users_names[id_screen_names[k]] = retweeted_users[k]
 
-    def print_basic_info(self, color):
+    def print_basic_info(self):
         """
         Print basic info about the user
         """
-        if color:
+        if args.color:
             def bold(text):
-                return '\033[1m' + text + '\033[0m'
+                if type(text) == str:
+                    return '\033[1m' + str(text.encode('utf-8')) + '\033[0m'
+                elif type(text) == datetime.datetime or type(text) == int:
+                    return '\033[1m' + str(text) + '\033[0m'
+                else:
+                    return '\033[1m' + text + '\033[0m'
         else:
             def bold(text):
                 return text
@@ -357,7 +399,7 @@ class User():
             censored = self.user_info.withheld_in_countries
         except Exception as e:
             censored = 'None'
-        print('[+] Censored in countries : {}'.format(censored))
+        print('[+] Censored in countries : {}'.format(bold(censored)))
         print('')
 
     def print_followers(self):
@@ -376,6 +418,7 @@ class User():
             self.process_friends()
             self.print_stats(self.friends_lang, "[+] Top Friends languages.", top=10)
             self.print_stats(self.friends_timezone, "[+] Top Friends timezones.", top=10)
+            pickle.dump(self.friends.keys(), open('./' + self.screen_name + '.picklefriends', 'wb'))
 
     def process_friends(self):
         """ Process all the friends """
@@ -679,7 +722,7 @@ if __name__ == '__main__':
         parser.add_argument('--utc-offset', type=int, help='Manually apply a timezone offset (in seconds)')
         parser.add_argument('-s', '--nosummary', action='store_true', default=False, help='Do not show the summary of the user.')
         parser.add_argument('-F', '--quickfollowers', action='store_true', help='Print only a very short summary about the number of followers for the users. Useful to run with cron and store the results.')
-        parser.add_argument('-c', '--color', action='store_true', help='Use colors when printing')
+        parser.add_argument('-c', '--color', action='store_true', help='Do not  Use colors when printing', default=True)
         parser.add_argument('-N', '--numfriends', action='store', help='Max amount of friends to retrieve. Defaults to 200. Use -1 to retrieve all of them. Warning! this can take long, since twitter limits 700 friends requests every 15mins approx.', default=200, type=int)
         parser.add_argument('-o', '--offline', action='store_true', default=False, help='Use the offline data stored in cache for all the actions. Do not retrieve them from Twitter (use after you retrieved it at least once).')
         parser.add_argument('-d', '--debug', action='store', type=int, default=0, help='Debug level.')
@@ -688,6 +731,7 @@ if __name__ == '__main__':
         parser.add_argument('-i', '--listcacheusers', action='store_true', help='List the users in the cache.')
         parser.add_argument('-g', '--graphusers', action='store_true', help='Get the list of users specified with -n, read their _offline_ data, and create a unique graph for all their shared friends. Two files are generated: graph.png and graph.dot. The PNG is an image with basic properties. The dot file is for you to play and improve the graph (e.g. cat graph.dot |sfdp -Tpng -o graph2.png). Use -m to limit the minimum amount of shared connections you want in the graph.')
         parser.add_argument('-m', '--minnumnsharednodes', action='store', help='Together with -g for making a graph, this options selects the minimum amount of shared friends to put in the graph as nodes. Defaults to 2', default=2, type=int)
+        parser.add_argument('-S', '--sentiment', action='store_true', help='Analyze the sentiment of each twitt', default=False)
         args = parser.parse_args()
 
         # The path everyone uses to access the cache
@@ -741,7 +785,9 @@ if __name__ == '__main__':
                         user.print_followers()
                     # Option by default, print a Summary of the account, including the friends
                     elif not args.nosummary:
-                        user.print_summary(args.color)
+                        user.print_summary()
+                        if args.sentiment:
+                            user.analyze_sentiments()
                     # Store this user in our disk cache
                     pickle.dump(user, open( dirpath + name + '/' + name + '.data', "wb" ) )
                 except KeyboardInterrupt:
