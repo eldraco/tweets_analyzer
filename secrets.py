@@ -7,3 +7,7 @@ consumer_secret="xxxxxxxxxxxxx"
 # Create an access token under the the "Your access token" section
 access_token="xxxxxxxx-xxxxxxxxxxxxxxxxxxxxxxxxxxx"
 access_token_secret="xxxxxxxxxxxxxxxxxxxxxxx"
+
+# API for repustate sentiment analysis. Get you API key for free from https://www.repustate.com
+repustate_client = Client(api_key='xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx', version='v3')
+
