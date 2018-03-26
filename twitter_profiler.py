@@ -36,7 +36,6 @@ from ascii_graph.colors import Gre, Yel, Red
 from ascii_graph.colordata import hcolor
 from collections import OrderedDict
 from tqdm import tqdm
-from repustate import Client
 import tweepy
 import numpy
 import argparse
