@@ -170,6 +170,7 @@ class User():
                 return True
             else:
                 print e
+                return False
 
     def get_tweets(self):
         """ Download Tweets from username account """
@@ -785,6 +786,9 @@ if __name__ == '__main__':
                         user.print_followers()
                     # Option by default, print a Summary of the account, including the friends
                     elif not args.nosummary:
+                        if args.offline and not user.user_info:
+                            print('The user {} is not in our cache database.'.format(user.screen_name))
+                            sys.exit(0)
                         user.print_summary()
                         if args.sentiment:
                             user.analyze_sentiments()
