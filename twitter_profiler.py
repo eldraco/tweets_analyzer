@@ -183,6 +183,9 @@ class User():
         else:
             # Download tweets
             try:
+                if num_tweets == 0:
+                    # If the number of tweets to retrieve is zero, get out...
+                    return True
                 if len(self.tweets) != self.user_info.statuses_count:
                     print('[+] Downloading {} tweets...'.format(num_tweets))
                     try:
