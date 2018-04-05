@@ -382,6 +382,7 @@ class User():
         print('[+] utc_offset     : {}'.format(bold(str(self.user_info.utc_offset))))
         print('[+] Followers      : {}'.format(bold(str(self.user_info.followers_count))))
         print('[+] Friends        : {}'.format(bold(str(self.user_info.friends_count))))
+        print('[+] FFR            : {} (Close to 1: Mostly Followed. Close to -1: Mostly follows.)'.format(bold(str( (float(self.user_info.followers_count) - self.user_info.friends_count) / (self.user_info.followers_count + self.user_info.friends_count) ))))
         print('[+] Friends cache  : {}'.format(bold(str(len(self.friends)))))
         print('[+] MemberPubLits  : {}'.format(bold(str(self.user_info.listed_count))))
         print('[+] Location       : {}'.format(bold(self.user_info.location)))
