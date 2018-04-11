@@ -52,7 +52,7 @@ import pickle
 import shutil
 
 
-__version__ = '0.4'
+__version__ = '0.5'
 
 def set_output_encoding(encoding='utf-8'):
     """ 
@@ -94,7 +94,11 @@ class User():
         self.id_screen_names = {}
         self.friends_timezone = collections.Counter()
         self.friends_lang = collections.Counter()
+        self.friends_ids = {}
         self.friends = {}
+        self.followers_ids = {}
+        self.last_follower_retrieved_id = False
+        self.followers = {}
         self.dirpath = ''
         self.last_friend_retrieved_id = False
         self.user_info = False
@@ -236,6 +240,22 @@ class User():
         # Print info about the friends
         self.get_friends()
         self.print_friends_analysis()
+        # Print info about the followers
+        try:
+            _temp = self.followers
+        except AttributeError:
+            self.followers = {}
+            self.followers_ids = {}
+            self.last_follower_retrieved_id = False
+        self.get_followers()
+        self.print_followers_analysis()
+        # Store friends and followers on disk
+        temp_dict = {}
+        temp_dict['followers'] = []
+        temp_dict['friends'] = []
+        temp_dict['followers'] = self.followers.keys()
+        temp_dict['friends'] = self.friends.keys()
+        pickle.dump(temp_dict, open(dirpath + self.screen_name + '/' + self.screen_name + '.picklefriends', 'wb'))
 
     def print_tweets(self):
         """ Get the tweets and print them"""
@@ -384,9 +404,16 @@ class User():
         print('[+] geo_enabled    : {}'.format(bold(str(self.user_info.geo_enabled))))
         print('[+] time_zone      : {}'.format(bold(str(self.user_info.time_zone))))
         print('[+] utc_offset     : {}'.format(bold(str(self.user_info.utc_offset))))
-        print('[+] Followers      : {}'.format(bold(str(self.user_info.followers_count))))
-        print('[+] Friends        : {}'.format(bold(str(self.user_info.friends_count))))
         print('[+] FFR            : {} (Close to 1: Mostly Followed. Close to -1: Mostly follows.)'.format(bold(str( (float(self.user_info.followers_count) - self.user_info.friends_count) / (self.user_info.followers_count + self.user_info.friends_count) ))))
+        try:
+            print('[+] Followers      : {}'.format(bold(str(self.user_info.followers_count))))
+        except AttributeError:
+            print()
+        try:
+            print('[+] Followers cache: {}'.format(bold(str(len(self.followers)))))
+        except AttributeError:
+            print()
+        print('[+] Friends        : {}'.format(bold(str(self.user_info.friends_count))))
         print('[+] Friends cache  : {}'.format(bold(str(len(self.friends)))))
         print('[+] MemberPubLits  : {}'.format(bold(str(self.user_info.listed_count))))
         print('[+] Location       : {}'.format(bold(self.user_info.location)))
@@ -410,7 +437,7 @@ class User():
         """ 
         Print only the info about followers
         """
-        print('{},{},{}'.format(datetime.datetime.now(),self.screen_name,self.user_info.followers_count))
+        print('{},{},{}'.format(datetime.datetime.now(), self.screen_name, self.user_info.followers_count))
 
     def print_friends_analysis(self):
         """
@@ -422,7 +449,6 @@ class User():
             self.process_friends()
             self.print_stats(self.friends_lang, "[+] Top Friends languages.", top=10)
             self.print_stats(self.friends_timezone, "[+] Top Friends timezones.", top=10)
-            pickle.dump(self.friends.keys(), open('./' + self.screen_name + '.picklefriends', 'wb'))
 
     def process_friends(self):
         """ Process all the friends """
@@ -440,7 +466,7 @@ class User():
                     print 'The friend does not have data!'
 
     def get_friends_twitter_api(self):
-        """ use the api for getting frinds """
+        """ use the api for getting friends """
         try:
             self.friends_ids = twitter_api.friends_ids(self.screen_name)
         except tweepy.error.TweepError as e:
@@ -538,6 +564,135 @@ class User():
             # Store the friends at the end
             pickle.dump(user, open( dirpath + name + '/' + name + '.data', "wb" ) )
         # Finally continue processing the friends
+
+    def print_followers_analysis(self):
+        """
+        Analyze the followers of this user
+        """
+        # If the account is protected, we can not ask for its followers
+        if not self.protected:
+            try:
+                print('[+] Analyzing {} followers.'.format(len(self.followers)))
+                self.process_followers()
+                self.print_stats(self.followers_lang, "[+] Top Friends languages.", top=10)
+                self.print_stats(self.followers_timezone, "[+] Top Friends timezones.", top=10)
+            except AttributeError:
+                pass
+
+    def process_followers(self):
+        """ Process all the followers """
+        self.followers_timezone = collections.Counter()
+        self.followers_lang = collections.Counter()
+        for follower in self.followers:
+            try:
+                if self.followers[follower].user_info.lang:
+                    self.followers_lang[self.followers[follower].user_info.lang] += 1
+                if self.followers[follower].user_info.time_zone:
+                    self.followers_timezone[self.followers[follower].user_info.time_zone] += 1
+            except AttributeError:
+                if args.debug > 2:
+                    print('Processing Friend {}'.format(follower))
+                    print 'The follower does not have data!'
+
+    def get_followers_twitter_api(self):
+        """ use the api for getting followers """
+        try:
+            self.followers_ids = twitter_api.followers_ids(self.screen_name)
+        except tweepy.error.TweepError as e:
+            try:
+                if e == 'Not authorized':
+                    print('The account of this user is protected, we can not get its followers.')
+                elif e[0][0]['code'] == 50: # 50 is user not found
+                    return False
+                elif e[0][0]['code'] == 63: # user suspended
+                    return False
+                elif e[0][0]['code'] == 88: # Rate limit
+                    print("Rate limit exceeded to get followers data, we will sleep are retry in 15 minutes. The followers so far are stored.")
+                    # Sleep
+                    print('Waiting 5 minutes...')
+                    time.sleep(300)
+                    print('Resuming download...')
+                    # Warning, this can loop
+                    self.get_followers_twitter_api()
+            except TypeError:
+                print e
+
+    def get_followers(self):
+        """
+        Get followers. Load followers from cache
+        If offline, do not retrieve from twitter 
+        If online and we have in the cache less than the limit, continue downloading from the last followers downloaded
+        """
+        # Are we offline?
+        if args.debug > 0 and args.offline:
+            print('We are in offline mode, so we are not downloading more followers.')
+        # If we are not offline and the user is not protected, try to get their followers
+        elif not args.offline and not self.protected and len(self.followers) != self.user_info.followers_count:
+            # Get the list of followers from twitter
+            self.get_followers_twitter_api()
+            if args.debug > 0:
+                print('Total amount of followers that follow this user: {}'.format(self.user_info.followers_count))
+                print('Total amount of followers downloaded in cache: {}'.format(len(self.followers)))
+            # If the limit requested is > than the amount we already have, continue downloading from where we left
+            if self.last_follower_retrieved_id and self.last_follower_retrieved_id != self.followers_ids[-1]:
+                if args.debug > 0:
+                    print('We didn\'t finished downloading the list of followers. Continuing...')
+                followers_to_continue_download = self.followers_ids[self.followers_ids.index(self.last_follower_retrieved_id):]
+            else:
+                followers_to_continue_download = self.followers_ids
+            followers_to_download = followers_to_continue_download[:args.numfollowers]
+            print('Followers to download: Next {} (user has {} followers)'.format(len(followers_to_download), self.user_info.followers_count))
+            # We split the followers in groups in case we need to sleep because we are asking to much. Now not so used because we wait for the twitter exception
+            amount_users = 0
+            # This prints the bar
+            with tqdm(total=len(followers_to_download)) as pbar:
+                for follower_id in followers_to_download:
+                        try:
+                            pbar.update(1)
+                            if args.debug > 1:
+                                print('Downloading follower Nr {}: {}'.format(amount_users, follower_id))
+                            try:
+                                follower = twitter_api.get_user(follower_id)
+                            except tweepy.error.TweepError as e:
+                                try:
+                                    if e == 'Not authorized':
+                                        print('[+] The account of this user is protected, we can not get its followers.')
+                                    elif e[0][0]['code'] == 88 or e[0][0]['code'] == 50:
+                                        print("[+] Rate limit exceeded to get followers data, we will sleep are retry in 15 minutes. The followers so far are stored.")
+                                    # Store this user so far
+                                    pickle.dump(user, open( dirpath + name + '/' + name + '.data', "wb" ) )
+                                    # Sleep
+                                    print('Waiting 15 minutes...')
+                                    time.sleep(900)
+                                    print('Resuming download...')
+                                    # Retrieve the same last user that we couldn't before
+                                    follower = twitter_api.get_user(follower_id)
+                                    continue
+                                except TypeError:
+                                    # For some reason the error from twitter not always can be indexed...
+                                    print e
+                                    # catch all? What are we doing here?
+                                    print('Weird error {}'.format(e))
+                                    print('Save user just in case.')
+                                    pickle.dump(user, open( dirpath + name + '/' + name + '.data', "wb" ) )
+                            except Exception as e:
+                                # catch all? What are we doing here?
+                                print('Weird error {}'.format(e))
+                                print('Save user just in case.')
+                                pickle.dump(user, open( dirpath + name + '/' + name + '.data', "wb" ) )
+                            UserFriend = User(follower.screen_name)
+                            UserFriend.set_twitter_info(follower)
+                            self.followers[follower.screen_name] = UserFriend
+                            self.last_follower_retrieved_id = UserFriend.user_info.id
+                            amount_users += 1
+                        except KeyboardInterrupt:
+                            # Print Summary of detections in the last Time Window
+                            print('Keyboard Interrupt. Storing the user so far.')
+                            pickle.dump(user, open( dirpath + name + '/' + name + '.data', "wb" ) )
+                            return True
+            # Store the followers at the end
+            pickle.dump(user, open( dirpath + name + '/' + name + '.data', "wb" ) )
+        # Finally continue processing the followers
 
     def print_stats(self, dataset, text, top=5):
         """ Displays top values of something by order """
@@ -728,6 +883,7 @@ if __name__ == '__main__':
         parser.add_argument('-F', '--quickfollowers', action='store_true', help='Print only a very short summary about the number of followers for the users. Useful to run with cron and store the results.')
         parser.add_argument('-c', '--color', action='store_true', help='Do not  Use colors when printing', default=True)
         parser.add_argument('-N', '--numfriends', action='store', help='Max amount of friends to retrieve. Defaults to 200. Use -1 to retrieve all of them. Warning! this can take long, since twitter limits 700 friends requests every 15mins approx.', default=200, type=int)
+        parser.add_argument('-O', '--numfollowers', action='store', help='Max amount of followers to retrieve. Defaults to 200. Use -1 to retrieve all of them. Warning! this can take long, since twitter limits 700 followers requests every 15mins approx.', default=200, type=int)
         parser.add_argument('-o', '--offline', action='store_true', default=False, help='Use the offline data stored in cache for all the actions. Do not retrieve them from Twitter (use after you retrieved it at least once).')
         parser.add_argument('-d', '--debug', action='store', type=int, default=0, help='Debug level.')
         parser.add_argument('-t', '--maxtweets', action='store', type=int, default=1000, help='Maximum amount of tweets to download for analysis per user.')
