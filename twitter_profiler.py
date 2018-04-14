@@ -505,10 +505,13 @@ class User():
                 print('Total amount of friends this user follows: {}'.format(self.user_info.friends_count))
                 print('Total amount of friends downloaded in cache: {}'.format(len(self.friends)))
             # If the limit requested is > than the amount we already have, continue downloading from where we left
+
+            print(self.last_friend_retrieved_id, self.friends_ids[-1])
             if self.last_friend_retrieved_id and self.last_friend_retrieved_id != self.friends_ids[-1]:
                 if args.debug > 0:
                     print('We didn\'t finished downloading the list of friends. Continuing...')
-                friends_to_continue_download = self.friends_ids[self.friends_ids.index(self.last_friend_retrieved_id):]
+                # We add one to download the list correctly
+                friends_to_continue_download = self.friends_ids[self.friends_ids.index(self.last_friend_retrieved_id) + 1:]
             else:
                 friends_to_continue_download = self.friends_ids
             friends_to_download = friends_to_continue_download[:args.numfriends]
@@ -965,11 +968,6 @@ if __name__ == '__main__':
                 for user in list:
                     print('+ {:17}'.format(user)),
                 print('')
-        # TODO
-        # Give me one user and monitor it in real time continually. Store new and old followers, etc.
-        # The language of tweets make it only for not retweeted tweets
-        # For computing user mentions, use ids and not screen names
-        # compare two users
 
     except tweepy.error.TweepError as e:
         print("[\033[91m!\033[0m] Twitter error: {}".format(e))
