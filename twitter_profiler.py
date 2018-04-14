@@ -640,7 +640,7 @@ class User():
             if self.last_follower_retrieved_id and self.last_follower_retrieved_id != self.followers_ids[-1]:
                 if args.debug > 0:
                     print('We didn\'t finished downloading the list of followers. Continuing...')
-                followers_to_continue_download = self.followers_ids[self.followers_ids.index(self.last_follower_retrieved_id):]
+                followers_to_continue_download = self.followers_ids[self.followers_ids.index(self.last_follower_retrieved_id) + 1:]
             else:
                 followers_to_continue_download = self.followers_ids
             followers_to_download = followers_to_continue_download[:args.numfollowers]
