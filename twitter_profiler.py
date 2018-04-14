@@ -505,8 +505,6 @@ class User():
                 print('Total amount of friends this user follows: {}'.format(self.user_info.friends_count))
                 print('Total amount of friends downloaded in cache: {}'.format(len(self.friends)))
             # If the limit requested is > than the amount we already have, continue downloading from where we left
-
-            print(self.last_friend_retrieved_id, self.friends_ids[-1])
             if self.last_friend_retrieved_id and self.last_friend_retrieved_id != self.friends_ids[-1]:
                 if args.debug > 0:
                     print('We didn\'t finished downloading the list of friends. Continuing...')
