@@ -575,8 +575,8 @@ class User():
             try:
                 print('[+] Analyzing {} followers.'.format(len(self.followers)))
                 self.process_followers()
-                self.print_stats(self.followers_lang, "[+] Top Friends languages.", top=10)
-                self.print_stats(self.followers_timezone, "[+] Top Friends timezones.", top=10)
+                self.print_stats(self.followers_lang, "[+] Top Followers languages.", top=10)
+                self.print_stats(self.followers_timezone, "[+] Top Followers timezones.", top=10)
             except AttributeError:
                 pass
 
