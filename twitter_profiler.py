@@ -50,6 +50,7 @@ from secrets import consumer_key, consumer_secret, access_token, access_token_se
 import pydot 
 import pickle
 import shutil
+import json
 
 
 __version__ = '0.5'
@@ -106,6 +107,8 @@ class User():
         self.protected = False
         self.activity_hourly = { ("%2i:00" % i).replace(" ", "0"): 0 for i in range(24) }
         self.activity_weekly = { "%i" % i: 0 for i in range(7) }
+        # Label of the user
+        self.label = ""
 
     def analyze_sentiments(self):
         """
@@ -127,8 +130,6 @@ class User():
         for twitt in self.tweets:
             if counter <= 0:
                 break
-            #print twitt
-            #print self.tweets[twitt]
             text = self.tweets[twitt].text.replace('\n',' ')
             try:
                 language = repustate_client.detect_language(text.encode('utf-8'))['language']
@@ -157,6 +158,8 @@ class User():
         """
         try:
             self.user_info = twitter_api.get_user(self.screen_name)
+            if args.debug > 2:
+                print 'Twitter user aquired from API.'
             # If the user is protected, mark it now. We do this here so from now on the object can deal with this situation correctly
             self.protected = self.user_info.protected
             return True
@@ -178,31 +181,41 @@ class User():
 
     def get_tweets(self):
         """ Download Tweets from username account """
-        num_tweets = numpy.amin([args.maxtweets, self.user_info.statuses_count])
-        if args.debug > 2: 
-            print('\tId of the Last tweet retrieved{}'.format(self.tweets.keys()[-1]))
+        tweets_still_to_retrieve = self.user_info.statuses_count - len(self.tweets)
+        num_tweets = numpy.amin([args.maxtweets, tweets_still_to_retrieve])
         if args.offline:
             # Don't download, so we will use the tweets already in the cache
             return True
         else:
             # Download tweets
             try:
-                if num_tweets == 0:
+                if tweets_still_to_retrieve == 0:
                     # If the number of tweets to retrieve is zero, get out...
                     return True
-                if len(self.tweets) != self.user_info.statuses_count:
-                    print('[+] Downloading {} tweets...'.format(num_tweets))
+                if len(self.tweets) < self.user_info.statuses_count:
+                    print('[+] Tweets in cache: {}. Tweets in the account: {}. Downloading next {} tweets...'.format(len(self.tweets), self.user_info.statuses_count, num_tweets))
                     try:
                         # We do have a last tweet downloaded, continue from there...
                         last_tweet_obtained = self.tweets.keys()[-1]
-                        for status in tqdm(tweepy.Cursor(twitter_api.user_timeline, screen_name=self.screen_name, max_id=last_tweet_obtained).items(num_tweets), unit="tw", total=num_tweets):
+                        if args.debug > 2:
+                            print('The last downloaded twit was: {}'.format(last_tweet_obtained))
+                        # This method can only return up to 3,200 of a user’s most recent Tweets
+                        for status in tqdm(tweepy.Cursor(twitter_api.user_timeline, screen_name=self.screen_name, since_id=last_tweet_obtained).items(num_tweets), unit="tw", total=num_tweets):
+                        #num_tweets = 3000
+                        #for status in tqdm(tweepy.Cursor(twitter_api.user_timeline, screen_name=self.screen_name, since_id=last_tweet_obtained).items(num_tweets), unit="tw", total=num_tweets):
                             # Create a new twit
+                            #if not self.tweets.has_key(status.id):
+                                #print 'NEW'
+                            #else:
+                                #print 'We had this tweet'
                             self.tweets[status.id] = status
                     except IndexError:
                         # No previous tweets downloaded, start fresh.
                         for status in tqdm(tweepy.Cursor(twitter_api.user_timeline, screen_name=self.screen_name).items(num_tweets), unit="tw", total=num_tweets):
                             # Create a new twit
                             self.tweets[status.id] = status
+                    except:
+                        print 'Unexpected error while retriving tweets in get_tweets()'
                 else:
                     # The number of previous tweets and current tweets is the same, do not download them
                     if args.debug > 1:
@@ -238,7 +251,6 @@ class User():
         # Print info about the tweets
         self.print_tweets()
         # Print info about the friends
-        self.get_friends()
         self.print_friends_analysis()
         # Print info about the followers
         try:
@@ -247,15 +259,46 @@ class User():
             self.followers = {}
             self.followers_ids = {}
             self.last_follower_retrieved_id = False
-        self.get_followers()
         self.print_followers_analysis()
+
+    def add_label(self, label):
+        """
+        Assign a label to the user.
+        For now, just one label
+        """
+        if args.debug > 1:
+            print 'Assigning the label: {}'.format(label)
+        self.label = label
+
+    def export(self):
+        """
+        Export the data from this user to a file.
+        The output is a json with this schema
+        { 'User Twitter name':
+                [ 
+                'followers': [ <list of followers names> ], 
+                'friends': [ <list of friends names> ],
+                'label': ""
+                ]
+        }
+        """
         # Store friends and followers on disk
         temp_dict = {}
-        temp_dict['followers'] = []
-        temp_dict['friends'] = []
-        temp_dict['followers'] = self.followers.keys()
-        temp_dict['friends'] = self.friends.keys()
-        pickle.dump(temp_dict, open(dirpath + self.screen_name + '/' + self.screen_name + '.picklefriends', 'wb'))
+        temp_dict[self.screen_name] = {}
+        temp_dict[self.screen_name]['followers'] = []
+        temp_dict[self.screen_name]['friends'] = []
+        try:
+            temp_dict[self.screen_name]['followers'] = self.followers.keys()
+        except AttributeError:
+            pass
+        try:
+            temp_dict[self.screen_name]['friends'] = self.friends.keys()
+        except AttributeError:
+            pass
+        temp_dict[self.screen_name]['label'] = self.label
+        user_json = json.dumps(temp_dict)
+        with open(dirpath + self.screen_name + '/' + self.screen_name + '-data.json', 'wb') as file:
+            file.write(user_json)
 
     def print_tweets(self):
         """ Get the tweets and print them"""
@@ -397,6 +440,10 @@ class User():
             def bold(text):
                 return text
         print('[+] User           : {}'.format(bold('@'+self.screen_name)))
+        try:
+            print('[+] Manual Label   : {}'.format(bold(self.label)))
+        except AttributeError:
+            print('[+] No Manual Label:')
         print('[+] Created on     : {}'.format(bold(self.user_info.created_at)))
         print('[+] Twitter ID     : {}'.format(bold(self.user_info.id)))
         print('[+] Current Date:  : {}'.format(bold(str(self.creation_time))))
@@ -415,7 +462,7 @@ class User():
             print()
         print('[+] Friends        : {}'.format(bold(str(self.user_info.friends_count))))
         print('[+] Friends cache  : {}'.format(bold(str(len(self.friends)))))
-        print('[+] MemberPubLits  : {}'.format(bold(str(self.user_info.listed_count))))
+        print('[+] MemberPubLists : {}'.format(bold(str(self.user_info.listed_count))))
         print('[+] Location       : {}'.format(bold(self.user_info.location)))
         print('[+] Name           : {}'.format(bold(self.user_info.name)))
         print('[+] Protected      : {}'.format(bold(str(self.user_info.protected))))
@@ -509,15 +556,18 @@ class User():
                 if args.debug > 0:
                     print('We didn\'t finished downloading the list of friends. Continuing...')
                 # We add one to download the list correctly
-                friends_to_continue_download = self.friends_ids[self.friends_ids.index(self.last_friend_retrieved_id) + 1:]
+                try:
+                    friends_to_continue_download = self.friends_ids[self.friends_ids.index(self.last_friend_retrieved_id) + 1:]
+                except ValueError:
+                    print 'We had an issue here. The last friend, saved to restored downloading, is not a friend anymore'
             else:
                 friends_to_continue_download = self.friends_ids
             friends_to_download = friends_to_continue_download[:args.numfriends]
-            print('Friends to download: Next {} (user has {} friends)'.format(len(friends_to_download), self.user_info.friends_count))
+            print('Friends to download: Next {} (user has {} friends, {} in our cache)'.format(len(friends_to_download), self.user_info.friends_count, len(self.friends)))
             # We split the friends in groups in case we need to sleep because we are asking to much. Now not so used because we wait for the twitter exception
             amount_users = 0
             # This prints the bar
-            with tqdm(total=len(friends_to_download)) as pbar:
+            with tqdm(total=len(friends_to_download), unit="user") as pbar:
                 for friend_id in friends_to_download:
                         try:
                             pbar.update(1)
@@ -624,6 +674,11 @@ class User():
         If offline, do not retrieve from twitter 
         If online and we have in the cache less than the limit, continue downloading from the last followers downloaded
         """
+        # Try to cache some old users where we don't have the followers yet
+        try: 
+            temp = self.followers
+        except AttributeError:
+            self.followers = []
         # Are we offline?
         if args.debug > 0 and args.offline:
             print('We are in offline mode, so we are not downloading more followers.')
@@ -642,11 +697,11 @@ class User():
             else:
                 followers_to_continue_download = self.followers_ids
             followers_to_download = followers_to_continue_download[:args.numfollowers]
-            print('Followers to download: Next {} (user has {} followers)'.format(len(followers_to_download), self.user_info.followers_count))
+            print('Followers to download: Next {} (user has {} followers, {} in our cache)'.format(len(followers_to_download), self.user_info.followers_count, len(self.followers)))
             # We split the followers in groups in case we need to sleep because we are asking to much. Now not so used because we wait for the twitter exception
             amount_users = 0
             # This prints the bar
-            with tqdm(total=len(followers_to_download)) as pbar:
+            with tqdm(total=len(followers_to_download), unit="user") as pbar:
                 for follower_id in followers_to_download:
                         try:
                             pbar.update(1)
@@ -893,6 +948,8 @@ if __name__ == '__main__':
         parser.add_argument('-g', '--graphusers', action='store_true', help='Get the list of users specified with -n, read their _offline_ data, and create a unique graph for all their shared friends. Two files are generated: graph.png and graph.dot. The PNG is an image with basic properties. The dot file is for you to play and improve the graph (e.g. cat graph.dot |sfdp -Tpng -o graph2.png). Use -m to limit the minimum amount of shared connections you want in the graph.')
         parser.add_argument('-m', '--minnumnsharednodes', action='store', help='Together with -g for making a graph, this options selects the minimum amount of shared friends to put in the graph as nodes. Defaults to 2', default=2, type=int)
         parser.add_argument('-S', '--sentiment', action='store_true', help='Analyze the sentiment of each twitt', default=False)
+        parser.add_argument('-L', '--label', action='store', required=False, type=str, help='Label to assign to this Twitter user. For humans use human, for bots use bot, for trolls use troll. ', default=False)
+        parser.add_argument('-e', '--export', action='store_true', help='Export the data of this user in his folder called <username>-data.json', default=False)
         args = parser.parse_args()
 
         # The path everyone uses to access the cache
@@ -913,15 +970,17 @@ if __name__ == '__main__':
             for name in args.names.split(','):
                 print('\nProcessing the name {}.'.format(name))
                 try:
+
                     # Should we delete the cache for this user?
                     if args.redocache:
                         shutil.rmtree(dirpath + name, ignore_errors=True)
+
                     # Create our folder if we need it, and the user object
                     try:
                         os.makedirs(dirpath + name)
+                        # It does not exist yet
                         if args.debug > 1:
                             print('Folders created in {}'.format(dirpath + name))
-                        # The folder Is not there
                         user = User(name)
                     except OSError:
                         # Already exists
@@ -931,28 +990,48 @@ if __name__ == '__main__':
                         # We always load the cache, if we are offline or not.
                         try:
                             datapath = os.path.expanduser(dirpath + name + '/' + name + '.data')
+                            # This takes time
                             user = pickle.load(open(datapath, 'rb'))
                         except IOError:
                             user = User(name)
                     user.dirpath = dirpath
-                    # Get basic info from twitter if we are not offline
+
+
+                    # If offline, load the file only, if online, get more data
+                    # Get basic info from twitter if we are not offline. If offline, get the cache
                     if not args.offline:
                         if args.debug > 1:
                             print('Getting basic twitter info.')
-                        if not user.get_twitter_info():
-                            continue
+                        #
+                        # Here is where most of the stuff happens, donwloading data from twitter api
+                        # Get basic info
+                        user.get_twitter_info()
+                        # Get friends
+                        user.get_friends()
+                        # Get followers
+                        user.get_followers()
+
+                    ############################
+                    # After downloading the data (or not if offline) do things with it
+                    # Add the label
+                    if args.label:
+                        user.add_label(args.label)
                     # Only show the amount of friends
-                    if args.quickfollowers:
+                    elif args.quickfollowers:
                         user.print_followers()
+                    # Export the data to disk
+                    elif args.export:
+                        user.export()
+                    elif args.sentiment:
+                        user.analyze_sentiments()
                     # Option by default, print a Summary of the account, including the friends
                     elif not args.nosummary:
+                        # To protect from offline asking of unknown users
                         if args.offline and not user.user_info:
                             print('The user {} is not in our cache database.'.format(user.screen_name))
                             sys.exit(0)
                         user.print_summary()
-                        if args.sentiment:
-                            user.analyze_sentiments()
-                    # Store this user in our disk cache
+                    # Always Store this user in our disk cache
                     pickle.dump(user, open( dirpath + name + '/' + name + '.data', "wb" ) )
                 except KeyboardInterrupt:
                     # Print Summary of detections in the last Time Window
