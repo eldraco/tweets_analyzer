@@ -455,11 +455,11 @@ class User():
         try:
             print('[+] Followers      : {}'.format(bold(str(self.user_info.followers_count))))
         except AttributeError:
-            print()
+            pass
         try:
             print('[+] Followers cache: {}'.format(bold(str(len(self.followers)))))
         except AttributeError:
-            print()
+            pass
         print('[+] Friends        : {}'.format(bold(str(self.user_info.friends_count))))
         print('[+] Friends cache  : {}'.format(bold(str(len(self.friends)))))
         print('[+] MemberPubLists : {}'.format(bold(str(self.user_info.listed_count))))
@@ -679,6 +679,10 @@ class User():
             temp = self.followers
         except AttributeError:
             self.followers = []
+        try: 
+            temp = self.last_follower_retrieved_id
+        except AttributeError:
+            self.last_follower_retrieved_id = False
         # Are we offline?
         if args.debug > 0 and args.offline:
             print('We are in offline mode, so we are not downloading more followers.')
@@ -973,6 +977,7 @@ if __name__ == '__main__':
 
                     # Should we delete the cache for this user?
                     if args.redocache:
+                        print 'Deleteing all the cache from this user and starting again.'
                         shutil.rmtree(dirpath + name, ignore_errors=True)
 
                     # Create our folder if we need it, and the user object
@@ -984,6 +989,7 @@ if __name__ == '__main__':
                         user = User(name)
                     except OSError:
                         # Already exists
+                        exists = True
                         if args.debug > 1:
                             print('The user {} exists, loading its data.'.format(name))
                         # Load what we know from this user
@@ -1005,34 +1011,36 @@ if __name__ == '__main__':
                         #
                         # Here is where most of the stuff happens, donwloading data from twitter api
                         # Get basic info
-                        user.get_twitter_info()
-                        # Get friends
-                        user.get_friends()
-                        # Get followers
-                        user.get_followers()
+                        exists = user.get_twitter_info()
+                        if exists:
+                            # Get friends
+                            user.get_friends()
+                            # Get followers
+                            user.get_followers()
 
                     ############################
                     # After downloading the data (or not if offline) do things with it
-                    # Add the label
-                    if args.label:
-                        user.add_label(args.label)
-                    # Only show the amount of friends
-                    elif args.quickfollowers:
-                        user.print_followers()
-                    # Export the data to disk
-                    elif args.export:
-                        user.export()
-                    elif args.sentiment:
-                        user.analyze_sentiments()
-                    # Option by default, print a Summary of the account, including the friends
-                    elif not args.nosummary:
-                        # To protect from offline asking of unknown users
-                        if args.offline and not user.user_info:
-                            print('The user {} is not in our cache database.'.format(user.screen_name))
-                            sys.exit(0)
-                        user.print_summary()
-                    # Always Store this user in our disk cache
-                    pickle.dump(user, open( dirpath + name + '/' + name + '.data', "wb" ) )
+                    if exists:
+                        # Add the label
+                        if args.label:
+                            user.add_label(args.label)
+                        # Only show the amount of friends
+                        if args.quickfollowers:
+                            user.print_followers()
+                        # Export the data to disk
+                        if args.export:
+                            user.export()
+                        if args.sentiment:
+                            user.analyze_sentiments()
+                        # Option by default, print a Summary of the account, including the friends
+                        if not args.nosummary:
+                            # To protect from offline asking of unknown users
+                            if args.offline and not user.user_info:
+                                print('The user {} is not in our cache database.'.format(user.screen_name))
+                                sys.exit(0)
+                            user.print_summary()
+                        # Always Store this user in our disk cache
+                        pickle.dump(user, open( dirpath + name + '/' + name + '.data', "wb" ) )
                 except KeyboardInterrupt:
                     # Print Summary of detections in the last Time Window
                     print('Keyboard Interrupt. Storing the user')
