@@ -82,6 +82,12 @@ optional arguments:
                         the graph as nodes. Defaults to 2
 ```
 
+# TODO
+- Give me one user and monitor it in real time continually. Store new and old followers, etc.
+- The language of tweets make it only for not retweeted tweets
+- For computing user mentions, use ids and not screen names
+- compare two users
+
 ### Example output
 
 ![Twitter account activity]()
