@@ -183,6 +183,7 @@ class User():
         """ Download Tweets from username account """
         tweets_still_to_retrieve = self.user_info.statuses_count - len(self.tweets)
         num_tweets = numpy.amin([args.maxtweets, tweets_still_to_retrieve])
+        num_tweets = 1000
         if args.offline:
             # Don't download, so we will use the tweets already in the cache
             return True
@@ -197,18 +198,21 @@ class User():
                     try:
                         # We do have a last tweet downloaded, continue from there...
                         last_tweet_obtained = self.tweets.keys()[-1]
+                        #print self.tweets.keys()
+                        #print last_tweet_obtained
+
                         if args.debug > 2:
                             print('The last downloaded twit was: {}'.format(last_tweet_obtained))
                         # This method can only return up to 3,200 of a user’s most recent Tweets
-                        for status in tqdm(tweepy.Cursor(twitter_api.user_timeline, screen_name=self.screen_name, since_id=last_tweet_obtained).items(num_tweets), unit="tw", total=num_tweets):
-                        #num_tweets = 3000
                         #for status in tqdm(tweepy.Cursor(twitter_api.user_timeline, screen_name=self.screen_name, since_id=last_tweet_obtained).items(num_tweets), unit="tw", total=num_tweets):
-                            # Create a new twit
-                            #if not self.tweets.has_key(status.id):
-                                #print 'NEW'
-                            #else:
-                                #print 'We had this tweet'
-                            self.tweets[status.id] = status
+                        #for status in tqdm(tweepy.Cursor(twitter_api.user_timeline, screen_name=self.screen_name, max_id=last_tweet_obtained).items(num_tweets), unit="tw", total=num_tweets):
+                        for status in tqdm(tweepy.Cursor(twitter_api.user_timeline, screen_name=self.screen_name).items(num_tweets), unit="tw", total=num_tweets):
+                            # Create a new twitt
+                            if not self.tweets.has_key(status.id):
+                                print 'NEW: {}'.format(status.id)
+                                self.tweets[status.id] = status
+                            else:
+                                print 'We had this tweet: {}'.format(status.id)
                     except IndexError:
                         # No previous tweets downloaded, start fresh.
                         for status in tqdm(tweepy.Cursor(twitter_api.user_timeline, screen_name=self.screen_name).items(num_tweets), unit="tw", total=num_tweets):
@@ -930,6 +934,17 @@ def plot_users(users, dirpath):
     pygraph.write_png('graph.png')
     pygraph.write_dot('graph.dot')
 
+
+def list_users_in_db():
+    # List the cache
+    list_of_users = os.listdir(dirpath)
+    composite_list = [list_of_users[x:x+10] for x in range(0, len(list_of_users),10)]
+    for list in composite_list:
+        for user in list:
+            print('+ {:17}'.format(user)),
+        print('')
+
+
 if __name__ == '__main__':
     try:
 	set_output_encoding()
@@ -1046,13 +1061,7 @@ if __name__ == '__main__':
                     print('Keyboard Interrupt. Storing the user')
                     pickle.dump(user, open( dirpath + name + '/' + name + '.data', "wb" ) )
         elif args.listcacheusers:
-            # List the cache
-            list_of_users = os.listdir(dirpath)
-            composite_list = [list_of_users[x:x+10] for x in range(0, len(list_of_users),10)]
-            for list in composite_list:
-                for user in list:
-                    print('+ {:17}'.format(user)),
-                print('')
+            list_users_in_db()
 
     except tweepy.error.TweepError as e:
         print("[\033[91m!\033[0m] Twitter error: {}".format(e))
