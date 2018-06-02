@@ -209,10 +209,11 @@ class User():
                         for status in tqdm(tweepy.Cursor(twitter_api.user_timeline, screen_name=self.screen_name).items(num_tweets), unit="tw", total=num_tweets):
                             # Create a new twitt
                             if not self.tweets.has_key(status.id):
-                                print 'NEW: {}'.format(status.id)
+                                #print 'NEW: {}'.format(status.id)
                                 self.tweets[status.id] = status
                             else:
-                                print 'We had this tweet: {}'.format(status.id)
+                                #print 'We had this tweet: {}'.format(status.id)
+                                pass
                     except IndexError:
                         # No previous tweets downloaded, start fresh.
                         for status in tqdm(tweepy.Cursor(twitter_api.user_timeline, screen_name=self.screen_name).items(num_tweets), unit="tw", total=num_tweets):
