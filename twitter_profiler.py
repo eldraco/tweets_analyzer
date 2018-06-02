@@ -51,9 +51,11 @@ import pydot
 import pickle
 import shutil
 import json
+from os import listdir
+from os.path import isdir, join
 
 
-__version__ = '0.5'
+__version__ = '0.5.1'
 
 def set_output_encoding(encoding='utf-8'):
     """ 
@@ -183,8 +185,7 @@ class User():
         """ Download Tweets from username account """
         tweets_still_to_retrieve = self.user_info.statuses_count - len(self.tweets)
         num_tweets = numpy.amin([args.maxtweets, tweets_still_to_retrieve])
-        num_tweets = 1000
-        if args.offline:
+        if args.offline or args.maxtweets <= 0:
             # Don't download, so we will use the tweets already in the cache
             return True
         else:
@@ -194,19 +195,14 @@ class User():
                     # If the number of tweets to retrieve is zero, get out...
                     return True
                 if len(self.tweets) < self.user_info.statuses_count:
-                    print('[+] Tweets in cache: {}. Tweets in the account: {}. Downloading next {} tweets...'.format(len(self.tweets), self.user_info.statuses_count, num_tweets))
+                    print('[+] Tweets to Download. In cache: {}. Tweets in the account: {}. Downloading next {} tweets...'.format(len(self.tweets), self.user_info.statuses_count, num_tweets))
                     try:
                         # We do have a last tweet downloaded, continue from there...
                         last_tweet_obtained = self.tweets.keys()[-1]
-                        #print self.tweets.keys()
-                        #print last_tweet_obtained
-
                         if args.debug > 2:
                             print('The last downloaded twit was: {}'.format(last_tweet_obtained))
                         # This method can only return up to 3,200 of a user’s most recent Tweets
-                        #for status in tqdm(tweepy.Cursor(twitter_api.user_timeline, screen_name=self.screen_name, since_id=last_tweet_obtained).items(num_tweets), unit="tw", total=num_tweets):
-                        #for status in tqdm(tweepy.Cursor(twitter_api.user_timeline, screen_name=self.screen_name, max_id=last_tweet_obtained).items(num_tweets), unit="tw", total=num_tweets):
-                        for status in tqdm(tweepy.Cursor(twitter_api.user_timeline, screen_name=self.screen_name).items(num_tweets), unit="tw", total=num_tweets):
+                        for status in tqdm(tweepy.Cursor(twitter_api.user_timeline, screen_name=self.screen_name, tweet_mode = 'extended').items(num_tweets), unit="tw", total=num_tweets):
                             # Create a new twitt
                             if not self.tweets.has_key(status.id):
                                 #print 'NEW: {}'.format(status.id)
@@ -294,10 +290,12 @@ class User():
         temp_dict[self.screen_name]['friends'] = []
         try:
             temp_dict[self.screen_name]['followers'] = self.followers.keys()
+            temp_dict[self.screen_name]['followers_ids'] = self.followers_ids
         except AttributeError:
             pass
         try:
             temp_dict[self.screen_name]['friends'] = self.friends.keys()
+            temp_dict[self.screen_name]['friends_ids'] = self.friends_ids
         except AttributeError:
             pass
         temp_dict[self.screen_name]['label'] = self.label
@@ -308,7 +306,7 @@ class User():
     def print_tweets(self):
         """ Get the tweets and print them"""
         # Get the tweets first
-        if self.get_tweets():
+        if self.tweets:
             # Analyze the tweets
             self.process_tweets()
             # Print them
@@ -456,7 +454,10 @@ class User():
         print('[+] geo_enabled    : {}'.format(bold(str(self.user_info.geo_enabled))))
         print('[+] time_zone      : {}'.format(bold(str(self.user_info.time_zone))))
         print('[+] utc_offset     : {}'.format(bold(str(self.user_info.utc_offset))))
-        print('[+] FFR            : {} (Close to 1: Mostly Followed. Close to -1: Mostly follows.)'.format(bold(str( (float(self.user_info.followers_count) - self.user_info.friends_count) / (self.user_info.followers_count + self.user_info.friends_count) ))))
+        try:
+            print('[+] FFR            : {} (Close to 1: Mostly Followed. Close to -1: Mostly follows.)'.format(bold(str( (float(self.user_info.followers_count) - self.user_info.friends_count) / (self.user_info.followers_count + self.user_info.friends_count) ))))
+        except ZeroDivisionError:
+            print('[+] FFR            : Und (Close to 1: Mostly Followed. Close to -1: Mostly follows.)')
         try:
             print('[+] Followers      : {}'.format(bold(str(self.user_info.followers_count))))
         except AttributeError:
@@ -546,9 +547,9 @@ class User():
         If offline, do not retrieve from twitter 
         If online and we have in the cache less than the limit, continue downloading from the last friend downloaded
         """
-        # Are we offline?
-        if args.debug > 0 and args.offline:
-            print('We are in offline mode, so we are not downloading more friends.')
+        # Are we offline? or we were asked to dowload 0 friends
+        if args.offline or args.numfollowers <= 0:
+            return True
         # If we are not offline and the user is not protected, try to get their friends
         elif not args.offline and not self.protected and len(self.friends) != self.user_info.friends_count:
             # Get the list of friends from twitter
@@ -688,9 +689,9 @@ class User():
             temp = self.last_follower_retrieved_id
         except AttributeError:
             self.last_follower_retrieved_id = False
-        # Are we offline?
-        if args.debug > 0 and args.offline:
-            print('We are in offline mode, so we are not downloading more followers.')
+        # Are we offline? or we were asked to dowload 0 followers
+        if args.offline or args.numfollowers <= 0:
+            return True
         # If we are not offline and the user is not protected, try to get their followers
         elif not args.offline and not self.protected and len(self.followers) != self.user_info.followers_count:
             # Get the list of followers from twitter
@@ -970,24 +971,31 @@ if __name__ == '__main__':
         parser.add_argument('-S', '--sentiment', action='store_true', help='Analyze the sentiment of each twitt', default=False)
         parser.add_argument('-L', '--label', action='store', required=False, type=str, help='Label to assign to this Twitter user. For humans use human, for bots use bot, for trolls use troll. ', default=False)
         parser.add_argument('-e', '--export', action='store_true', help='Export the data of this user in his folder called <username>-data.json', default=False)
+        parser.add_argument('-a', '--all', action='store_true', help='Apply the selected actions to all the users in the database.', default=False)
         args = parser.parse_args()
 
         # The path everyone uses to access the cache
         dirpath = os.path.expanduser('~/.twitter_analyzer_users/')
 
-        # If we want to plot users offline, we don't need even to connect to twitter
+        # If we want to plot users offline, we don't need even to connect to twitter. Do it and exit
         if args.graphusers:
             plot_users(args.names, dirpath)
             sys.exit(0)
 
-        # Connect to Twitter 
+        # Connect to Twitter from now on
         auth = tweepy.OAuthHandler(consumer_key, consumer_secret)
         auth.set_access_token(access_token, access_token_secret)
         twitter_api = tweepy.API(auth)
 
+        # Do we have names to process, or all the database?
+        if args.all:
+            names = [f for f in listdir(dirpath) if isdir(join(dirpath, f))]
+        else:
+            names = args.names.split(',')
+
         # Go user by user given
-        if args.names:
-            for name in args.names.split(','):
+        if names:
+            for name in names:
                 print('\nProcessing the name {}.'.format(name))
                 try:
 
@@ -1033,6 +1041,8 @@ if __name__ == '__main__':
                             user.get_friends()
                             # Get followers
                             user.get_followers()
+                            # Get twitts
+                            user.get_tweets()
 
                     ############################
                     # After downloading the data (or not if offline) do things with it
