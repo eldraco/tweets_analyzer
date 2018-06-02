@@ -83,10 +83,13 @@ optional arguments:
 ```
 
 # TODO
-- Give me one user and monitor it in real time continually. Store new and old followers, etc.
+- Download the id of followers and friends instead of the complete objects
+- Store the data in a neo4j
+- Compute new features
 - The language of tweets make it only for not retweeted tweets
 - For computing user mentions, use ids and not screen names
 - compare two users
+- Give me one user and monitor it in real time continually. Store new and old followers, etc.
 
 ### Example output
 
