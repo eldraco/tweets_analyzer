@@ -83,7 +83,7 @@ optional arguments:
 ```
 
 # TODO
-- Download the id of followers and friends instead of the complete objects
+- Find a way to download old tweets.
 - Store the data in a neo4j
 - Compute new features
 - The language of tweets make it only for not retweeted tweets
