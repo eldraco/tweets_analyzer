@@ -55,7 +55,7 @@ from os import listdir
 from os.path import isdir, join
 
 
-__version__ = '0.5.1'
+__version__ = '0.5.2'
 
 def set_output_encoding(encoding='utf-8'):
     """ 
@@ -111,6 +111,12 @@ class User():
         self.activity_weekly = { "%i" % i: 0 for i in range(7) }
         # Label of the user
         self.label = ""
+
+    def analyze_features(self):
+        """
+        Computes the features for this profile
+        """
+        self.FFR = (float(self.user_info.followers_count) - self.user_info.friends_count) / (self.user_info.followers_count + self.user_info.friends_count)
 
     def analyze_sentiments(self):
         """
@@ -456,7 +462,7 @@ class User():
         print('[+] time_zone      : {}'.format(bold(str(self.user_info.time_zone))))
         print('[+] utc_offset     : {}'.format(bold(str(self.user_info.utc_offset))))
         try:
-            print('[+] FFR            : {} (Close to 1: Mostly Followed. Close to -1: Mostly follows.)'.format(bold(str( (float(self.user_info.followers_count) - self.user_info.friends_count) / (self.user_info.followers_count + self.user_info.friends_count) ))))
+            print('[+] FFR            : {} (Close to 1: Mostly Followed. Close to -1: Mostly follows.)'.format(bold(str(self.FFR))))
         except ZeroDivisionError:
             print('[+] FFR            : Und (Close to 1: Mostly Followed. Close to -1: Mostly follows.)')
         try:
@@ -1064,6 +1070,8 @@ if __name__ == '__main__':
                             user.export()
                         if args.sentiment:
                             user.analyze_sentiments()
+                        # Analyze features of the profile
+                        user.analyze_features()
                         # Option by default, print a Summary of the account, including the friends
                         if not args.nosummary:
                             # To protect from offline asking of unknown users
