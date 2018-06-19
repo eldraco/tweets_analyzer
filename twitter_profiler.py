@@ -174,9 +174,10 @@ class User():
                 print('User has been suspended')
                 return False
             elif e[0][0]['code'] == 88: 
-                print('This user is protected and we can not get its data.')
+                #print('This user is protected and we can not get its data.')
+                print('Rate Limit exceeded to query users. Wait some minutes and try again.')
                 self.protected = True
-                return True
+                return False
             else:
                 print e
                 return False
@@ -982,6 +983,11 @@ if __name__ == '__main__':
             plot_users(args.names, dirpath)
             sys.exit(0)
 
+        # If we have to list, just list
+        if args.listcacheusers:
+            list_users_in_db()
+            sys.exit(0)
+
         # Connect to Twitter from now on
         auth = tweepy.OAuthHandler(consumer_key, consumer_secret)
         auth.set_access_token(access_token, access_token_secret)
@@ -990,7 +996,7 @@ if __name__ == '__main__':
         # Do we have names to process, or all the database?
         if args.all:
             names = [f for f in listdir(dirpath) if isdir(join(dirpath, f))]
-        else:
+        elif not args.all:
             names = args.names.split(',')
 
         # Go user by user given
@@ -1036,7 +1042,7 @@ if __name__ == '__main__':
                         # Here is where most of the stuff happens, donwloading data from twitter api
                         # Get basic info
                         exists = user.get_twitter_info()
-                        if exists:
+                        if exists and not user.protected:
                             # Get friends
                             user.get_friends()
                             # Get followers
@@ -1071,8 +1077,6 @@ if __name__ == '__main__':
                     # Print Summary of detections in the last Time Window
                     print('Keyboard Interrupt. Storing the user')
                     pickle.dump(user, open( dirpath + name + '/' + name + '.data', "wb" ) )
-        elif args.listcacheusers:
-            list_users_in_db()
 
     except tweepy.error.TweepError as e:
         print("[\033[91m!\033[0m] Twitter error: {}".format(e))
