@@ -55,7 +55,9 @@ from os import listdir
 from os.path import isdir, join
 
 
-__version__ = '0.5.2'
+__version__ = '0.5.3'
+# The features dict is global because we dont want to store it in the user since all of its values are already there. Is only to put them together
+features = {}
 
 def set_output_encoding(encoding='utf-8'):
     """ 
@@ -93,6 +95,7 @@ class User():
         self.tweets_detected_timezones = collections.Counter()
         self.retweets = 0
         self.retweeted_users = collections.Counter()
+        self.retweeted_users_names = {}
         self.tweets_mentioned_users = collections.Counter()
         self.id_screen_names = {}
         self.friends_timezone = collections.Counter()
@@ -117,6 +120,8 @@ class User():
         Computes the features for this profile
         """
         self.FFR = (float(self.user_info.followers_count) - self.user_info.friends_count) / (self.user_info.followers_count + self.user_info.friends_count)
+        features['FFR'] = self.FFR
+        features['retweets'] = self.retweets
 
     def analyze_sentiments(self):
         """
@@ -274,9 +279,26 @@ class User():
         Assign a label to the user.
         For now, just one label
         """
+        # Label format: float:str,str,str,str
+        # Means: the float is the probability of being a human. This is the Label-What
+        # The str are the categories for this account. This is the label-How
+        # For example: 1:Troll,Social,Ads
+        # For example: 0.5:Social,Ads,Authority
+        try:
+            label_what = float(label.split(':')[0])
+            if label_what < 0 or label_what > 1:
+                print('The label format is incorrect. The first part should be a float between 0 and 1')
+                return False
+        except:
+            print('The label format is incorrect. The first part should be a float between 0 and 1')
+            return False
+        try:
+            label_how = label.split(':')[1].split(',')
+        except:
+            return False
         if args.debug > 1:
             print 'Assigning the label: {}'.format(label)
-        self.label = label
+        self.label = {'label_what':label_what, 'label_how':label_how}
 
     def export(self):
         """
@@ -290,25 +312,30 @@ class User():
                 ]
         }
         """
-        # Store friends and followers on disk
-        temp_dict = {}
-        temp_dict[self.screen_name] = {}
-        temp_dict[self.screen_name]['followers'] = []
-        temp_dict[self.screen_name]['friends'] = []
-        try:
-            temp_dict[self.screen_name]['followers'] = self.followers.keys()
-            temp_dict[self.screen_name]['followers_ids'] = self.followers_ids
-        except AttributeError:
-            pass
-        try:
-            temp_dict[self.screen_name]['friends'] = self.friends.keys()
-            temp_dict[self.screen_name]['friends_ids'] = self.friends_ids
-        except AttributeError:
-            pass
-        temp_dict[self.screen_name]['label'] = self.label
-        user_json = json.dumps(temp_dict)
-        with open(dirpath + self.screen_name + '/' + self.screen_name + '-data.json', 'wb') as file:
-            file.write(user_json)
+        if not self.label:
+            print('The user can not be exported because it does not have a label yet.')
+        else:
+            # Store friends and followers on disk
+            temp_dict = {}
+            temp_dict[self.screen_name] = {}
+            temp_dict[self.screen_name]['followers'] = []
+            temp_dict[self.screen_name]['friends'] = []
+            # Take this from the global featuers
+            temp_dict[self.screen_name]['features'] = features
+            try:
+                temp_dict[self.screen_name]['followers'] = self.followers.keys()
+                temp_dict[self.screen_name]['followers_ids'] = self.followers_ids
+            except AttributeError:
+                pass
+            try:
+                temp_dict[self.screen_name]['friends'] = self.friends.keys()
+                temp_dict[self.screen_name]['friends_ids'] = self.friends_ids
+            except AttributeError:
+                pass
+            temp_dict[self.screen_name]['label'] = self.label
+            user_json = json.dumps(temp_dict)
+            with open(dirpath + self.screen_name + '/' + self.screen_name + '-data.json', 'wb') as file:
+                file.write(user_json)
 
     def print_tweets(self):
         """ Get the tweets and print them"""
@@ -427,13 +454,6 @@ class User():
         self.print_charts(self.activity_hourly, "Daily activity distribution (per hour)")
         self.print_charts(self.activity_weekly, "Weekly activity distribution (per day)", weekday=True)
 
-    def print_more_infos(self):
-        """ Print charts """
-        # Converting users id to screen_names
-        retweeted_users_names = {}
-        for k in retweeted_users.keys():
-            retweeted_users_names[id_screen_names[k]] = retweeted_users[k]
-
     def print_basic_info(self):
         """
         Print basic info about the user
@@ -451,7 +471,8 @@ class User():
                 return text
         print('[+] User           : {}'.format(bold('@'+self.screen_name)))
         try:
-            print('[+] Manual Label   : {}'.format(bold(self.label)))
+            print('[+] What Label     : {}'.format(bold(str(self.label['label_what']))))
+            print('[+] How Label      : {}'.format(self.label['label_how']))
         except AttributeError:
             print('[+] No Manual Label:')
         print('[+] Created on     : {}'.format(bold(self.user_info.created_at)))
@@ -482,6 +503,7 @@ class User():
         print('[+] Screen Name    : {}'.format(bold(self.screen_name)))
         print('[+] # Tweets       : {}'.format(bold(str(self.user_info.statuses_count))))
         print('[+] # Tweets cache : {}'.format(bold(str(len(self.tweets)))))
+        print('[+] # ReTweets cache : {}'.format(bold(self.retweets)))
         print('[+] URL            : {}'.format(bold(str(self.user_info.url))))
         print('[+] Verified?      : {}'.format(bold(str(self.user_info.verified))))
         print('[+] Tweets liked   : {}'.format(bold(str(self.user_info.favourites_count))))
@@ -1061,13 +1083,12 @@ if __name__ == '__main__':
                     if exists:
                         # Add the label
                         if args.label:
-                            user.add_label(args.label)
+                            # Adding the label can fail because of the format
+                            if user.add_label(args.label) == False:
+                                sys.exit(-1)
                         # Only show the amount of friends
                         if args.quickfollowers:
                             user.print_followers()
-                        # Export the data to disk
-                        if args.export:
-                            user.export()
                         if args.sentiment:
                             user.analyze_sentiments()
                         # Analyze features of the profile
@@ -1079,6 +1100,9 @@ if __name__ == '__main__':
                                 print('The user {} is not in our cache database.'.format(user.screen_name))
                                 sys.exit(0)
                             user.print_summary()
+                        # Export the data to disk
+                        if args.export:
+                            user.export()
                         # Always Store this user in our disk cache
                         pickle.dump(user, open( dirpath + name + '/' + name + '.data', "wb" ) )
                 except KeyboardInterrupt:
